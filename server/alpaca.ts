@@ -21,10 +21,10 @@ const rawAlpacaBase =
 const ALPACA_BASE_URL = rawAlpacaBase.replace(/\/v2\/?$/, "");
 
 // ============================================================
-// Position sizing constants
+// Position sizing defaults (overridden by DB system_settings)
 // ============================================================
-const CRYPTO_ALLOCATION = 0.07; // 7% of equity per crypto trade
-const EQUITY_ALLOCATION = 0.05; // 5% of equity per stock trade
+const DEFAULT_CRYPTO_ALLOCATION = 0.07;
+const DEFAULT_EQUITY_ALLOCATION = 0.05;
 
 // ============================================================
 // Alpaca API types
@@ -96,11 +96,14 @@ export async function placePhaseCLimitOrder(
   signal: PhaseCSignal,
   accountEquity: number,
   isCrypto: boolean,
+  allocationOverride?: { equity: number; crypto: number },
 ): Promise<AlpacaOrderResponse> {
   assertKeysPresent();
 
-  // ---- Step 1: Position sizing ----
-  const allocation = isCrypto ? CRYPTO_ALLOCATION : EQUITY_ALLOCATION;
+  // ---- Step 1: Position sizing (uses DB settings if provided) ----
+  const equityAlloc = allocationOverride?.equity ?? DEFAULT_EQUITY_ALLOCATION;
+  const cryptoAlloc = allocationOverride?.crypto ?? DEFAULT_CRYPTO_ALLOCATION;
+  const allocation = isCrypto ? cryptoAlloc : equityAlloc;
   const allocatedFunds = accountEquity * allocation;
 
   // ---- Step 2: Raw quantity ----

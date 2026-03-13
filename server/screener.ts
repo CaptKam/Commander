@@ -62,12 +62,21 @@ export function isPatternAllowed(
 // ============================================================
 export async function processPhaseCSignals(
   candidates: PhaseCSignal[],
+  enabledPatterns?: string[],
 ): Promise<PhaseCSignal[]> {
   const validSignals: PhaseCSignal[] = [];
 
   for (const candidate of candidates) {
     // ---- Rule #3 gate: skip Crab / Deep Crab ----
     if (!isPatternAllowed(candidate.pattern)) {
+      continue;
+    }
+
+    // ---- Dynamic pattern filter from system_settings ----
+    if (enabledPatterns && !enabledPatterns.includes(candidate.pattern)) {
+      console.log(
+        `[Screener] Skipping ${candidate.pattern} — disabled in settings`,
+      );
       continue;
     }
 

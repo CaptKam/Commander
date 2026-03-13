@@ -5,6 +5,9 @@ import {
   numeric,
   timestamp,
   varchar,
+  boolean,
+  jsonb,
+  integer,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -75,3 +78,16 @@ export const watchlist = pgTable("watchlist", {
 });
 
 export type WatchlistEntry = typeof watchlist.$inferSelect;
+
+// ============================================================
+// System Settings Table — singleton row for bot configuration
+// ============================================================
+export const systemSettings = pgTable("system_settings", {
+  id: integer("id").primaryKey().default(1),
+  tradingEnabled: boolean("trading_enabled").notNull().default(true),
+  equityAllocation: numeric("equity_allocation", { precision: 5, scale: 4 }).notNull().default("0.05"),
+  cryptoAllocation: numeric("crypto_allocation", { precision: 5, scale: 4 }).notNull().default("0.07"),
+  enabledPatterns: jsonb("enabled_patterns").notNull().default(["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"]),
+});
+
+export type SystemSettings = typeof systemSettings.$inferSelect;

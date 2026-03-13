@@ -68,6 +68,21 @@ export async function ensureTablesExist(): Promise<void> {
       ON CONFLICT (symbol) DO NOTHING
     `);
     console.log("[DB] Table watchlist: OK (seeded defaults)");
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS system_settings (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        trading_enabled BOOLEAN NOT NULL DEFAULT true,
+        equity_allocation NUMERIC(5,4) NOT NULL DEFAULT 0.05,
+        crypto_allocation NUMERIC(5,4) NOT NULL DEFAULT 0.07,
+        enabled_patterns JSONB NOT NULL DEFAULT '["Gartley","Bat","Alt Bat","Butterfly","ABCD"]'::jsonb
+      )
+    `);
+    await db.execute(sql`
+      INSERT INTO system_settings (id) VALUES (1)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    console.log("[DB] Table system_settings: OK");
   } catch (err) {
     console.error("[DB] Failed to ensure tables exist:", err);
   }

@@ -13,6 +13,9 @@ import {
   Plus,
   Trash2,
   Eye,
+  Settings,
+  Power,
+  Shield,
 } from "lucide-react";
 
 // ============================================================
@@ -89,6 +92,14 @@ interface WatchlistEntry {
   assetClass: string;
 }
 
+interface BotSettings {
+  trading_enabled: boolean;
+  equity_allocation: number;
+  crypto_allocation: number;
+  enabled_patterns: string[];
+}
+
+const ALL_PATTERNS = ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"] as const;
 const POLL_INTERVAL = 10_000;
 
 // ============================================================
@@ -131,11 +142,12 @@ export default function App() {
   const [history, setHistory] = useState<ClosedTrade[]>([]);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistEntry[]>([]);
   const [newSymbol, setNewSymbol] = useState("");
+  const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes, setRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -144,6 +156,7 @@ export default function App() {
           fetch("/api/metrics").then((r) => r.json()),
           fetch("/api/history").then((r) => r.json()),
           fetch("/api/watchlist").then((r) => r.json()),
+          fetch("/api/settings").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value))
@@ -156,6 +169,8 @@ export default function App() {
         setHistory(histRes.value);
       if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value))
         setWatchlistItems(wlRes.value);
+      if (setRes.status === "fulfilled" && setRes.value && !setRes.value.error)
+        setBotSettings(setRes.value);
     } catch {
       // silent — dashboard will show stale data
     } finally {
@@ -189,6 +204,19 @@ export default function App() {
       // silent
     }
   }, [fetchAll]);
+
+  const updateSettings = useCallback(async (patch: Partial<BotSettings>) => {
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      setBotSettings((prev) => prev ? { ...prev, ...patch } : prev);
+    } catch {
+      // silent
+    }
+  }, []);
 
   useEffect(() => {
     fetchAll();
@@ -454,8 +482,11 @@ export default function App() {
         </section>
       </div>
 
-      {/* ==================== WATCHLIST MANAGER ==================== */}
-      <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden mb-4">
+      {/* ==================== CONTROL PANELS (side by side) ==================== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+
+      {/* WATCHLIST MANAGER */}
+      <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
           <Eye className="w-4 h-4 text-amber-400" />
           <h2 className="font-semibold text-sm">Watchlist Manager</h2>
@@ -513,6 +544,111 @@ export default function App() {
           )}
         </div>
       </section>
+
+      {/* SYSTEM SETTINGS */}
+      <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+          <Settings className="w-4 h-4 text-gray-400" />
+          <h2 className="font-semibold text-sm">System Settings</h2>
+        </div>
+        {botSettings ? (
+          <div className="p-4 space-y-4">
+            {/* Kill Switch */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Power className={`w-4 h-4 ${botSettings.trading_enabled ? "text-emerald-400" : "text-red-400"}`} />
+                <span className="text-sm font-medium">Live Auto-Trading</span>
+              </div>
+              <button
+                onClick={() => updateSettings({ trading_enabled: !botSettings.trading_enabled })}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  botSettings.trading_enabled ? "bg-emerald-500" : "bg-gray-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                    botSettings.trading_enabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Position Sizing */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Shield className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-xs text-gray-400">Position Sizing</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-gray-400 w-20">Stock %</label>
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  value={Math.round(botSettings.equity_allocation * 100)}
+                  onChange={(e) =>
+                    updateSettings({ equity_allocation: Number(e.target.value) / 100 })
+                  }
+                  className="flex-1 accent-blue-400 h-1.5"
+                />
+                <span className="text-sm font-medium w-10 text-right">
+                  {Math.round(botSettings.equity_allocation * 100)}%
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-gray-400 w-20">Crypto %</label>
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  value={Math.round(botSettings.crypto_allocation * 100)}
+                  onChange={(e) =>
+                    updateSettings({ crypto_allocation: Number(e.target.value) / 100 })
+                  }
+                  className="flex-1 accent-orange-400 h-1.5"
+                />
+                <span className="text-sm font-medium w-10 text-right">
+                  {Math.round(botSettings.crypto_allocation * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Pattern Toggles */}
+            <div className="space-y-2">
+              <span className="text-xs text-gray-400">Enabled Patterns</span>
+              <div className="flex flex-wrap gap-2">
+                {ALL_PATTERNS.map((p) => {
+                  const isEnabled = botSettings.enabled_patterns.includes(p);
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        const next = isEnabled
+                          ? botSettings.enabled_patterns.filter((x) => x !== p)
+                          : [...botSettings.enabled_patterns, p];
+                        if (next.length > 0) updateSettings({ enabled_patterns: next });
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                        isEnabled
+                          ? "bg-amber-400/10 text-amber-400 border-amber-400/30"
+                          : "bg-gray-800 text-gray-500 border-gray-700"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-gray-500 text-sm">
+            Loading settings...
+          </div>
+        )}
+      </section>
+
+      </div>
 
       {/* ==================== TRADE HISTORY (Graveyard) ==================== */}
       <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">

@@ -5,7 +5,7 @@
 
 import { Router } from "express";
 import { db } from "./db";
-import { liveSignals, watchlist } from "../shared/schema";
+import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { getCacheStats } from "./fmp";
 
@@ -359,6 +359,79 @@ router.delete("/watchlist/:symbol", async (req, res) => {
   } catch (err) {
     console.error("[API] Failed to remove from watchlist:", err);
     res.status(500).json({ error: "Failed to remove symbol" });
+  }
+});
+
+// ============================================================
+// System Settings
+// ============================================================
+
+/**
+ * GET /api/settings — Returns current bot configuration.
+ */
+router.get("/settings", async (_req, res) => {
+  try {
+    const rows = await db.select().from(systemSettings).limit(1);
+    if (rows.length === 0) {
+      return res.json({
+        trading_enabled: true,
+        equity_allocation: 0.05,
+        crypto_allocation: 0.07,
+        enabled_patterns: ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"],
+      });
+    }
+    const s = rows[0];
+    res.json({
+      trading_enabled: s.tradingEnabled,
+      equity_allocation: Number(s.equityAllocation),
+      crypto_allocation: Number(s.cryptoAllocation),
+      enabled_patterns: s.enabledPatterns as string[],
+    });
+  } catch (err) {
+    console.error("[API] Failed to fetch settings:", err);
+    res.status(500).json({ error: "Failed to fetch settings" });
+  }
+});
+
+/**
+ * POST /api/settings — Update bot configuration.
+ */
+router.post("/settings", async (req, res) => {
+  try {
+    const body = req.body as {
+      trading_enabled?: boolean;
+      equity_allocation?: number;
+      crypto_allocation?: number;
+      enabled_patterns?: string[];
+    };
+
+    const updates: Record<string, unknown> = {};
+
+    if (typeof body.trading_enabled === "boolean") {
+      updates.tradingEnabled = body.trading_enabled;
+    }
+    if (typeof body.equity_allocation === "number" && body.equity_allocation > 0 && body.equity_allocation <= 1) {
+      updates.equityAllocation = String(body.equity_allocation);
+    }
+    if (typeof body.crypto_allocation === "number" && body.crypto_allocation > 0 && body.crypto_allocation <= 1) {
+      updates.cryptoAllocation = String(body.crypto_allocation);
+    }
+    if (Array.isArray(body.enabled_patterns)) {
+      const ALL_PATTERNS = ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"];
+      const valid = body.enabled_patterns.filter((p) => ALL_PATTERNS.includes(p));
+      updates.enabledPatterns = valid;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    await db.update(systemSettings).set(updates).where(eq(systemSettings.id, 1));
+    console.log("[API] Settings updated:", updates);
+    res.json({ ok: true, updated: updates });
+  } catch (err) {
+    console.error("[API] Failed to update settings:", err);
+    res.status(500).json({ error: "Failed to update settings" });
   }
 });
 
