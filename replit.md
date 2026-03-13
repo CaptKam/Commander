@@ -1,5 +1,7 @@
 # Pattern Bot
 
+> **Read `CLAUDE.md` first.** It contains the full architecture rules, critical system constraints, and pattern exclusions. Everything in `CLAUDE.md` applies here. The rules below are Replit-specific additions.
+
 An automated harmonic pattern detection and execution system. Scans crypto and equity markets across 1-day and 4-hour timeframes, detects XABCD harmonic structures, and places live trades via the Alpaca API.
 
 ## Tech Stack
@@ -58,3 +60,13 @@ Run command: `npm start` (Express serves static frontend + runs trading engine o
 - Database is Replit's built-in PostgreSQL; `ensureTablesExist()` auto-creates schema at boot
 - Trading engine runs as a mutex-locked scan loop to prevent overlapping API calls
 - Crab and Deep Crab patterns are globally disabled (low win rates)
+
+## Replit Agent Rules
+
+1. **Entry Point:** `node --import tsx server/index.ts` — do NOT change this to `npx ts-node` or add a separate dev server.
+2. **Build Output:** Vite builds to `dist/` at the project root. The Express server serves static files from `process.cwd()/dist`. Do not change this path.
+3. **Environment Variables:** All secrets are in Replit Secrets. NEVER hardcode API keys or connection strings.
+4. **Paper Trading Only:** Always use `https://paper-api.alpaca.markets`. Never default to the live endpoint.
+5. **No Mock Data:** Never hardcode fake prices, fake positions, or test JSON. Always pull from the real Alpaca paper account or the PostgreSQL database.
+6. **Database:** PostgreSQL via Drizzle ORM only. Do not use raw SQL strings or add a second ORM.
+7. **No New Frameworks:** Do not add Next.js, Prisma, Sequelize, or any framework not already in `package.json`.
