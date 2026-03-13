@@ -123,15 +123,28 @@ router.get("/positions", async (_req, res) => {
 
 /**
  * GET /api/signals — Returns the most recent live signals from the DB.
+ * Deduplicates by (symbol, pattern, timeframe) to show only the latest of each.
  */
 router.get("/signals", async (_req, res) => {
   try {
     const signals = await db
       .select()
       .from(liveSignals)
-      .orderBy(desc(liveSignals.createdAt))
-      .limit(50);
-    res.json(signals);
+      .orderBy(desc(liveSignals.createdAt));
+
+    // Deduplicate: keep only the most recent signal per (symbol, patternType, timeframe)
+    const seen = new Set<string>();
+    const deduplicated = [];
+    for (const sig of signals) {
+      const key = `${sig.symbol}:${sig.patternType}:${sig.timeframe}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(sig);
+        if (deduplicated.length >= 50) break; // Limit to 50 unique patterns
+      }
+    }
+
+    res.json(deduplicated);
   } catch (err) {
     console.error("[API] Failed to fetch signals:", err);
     res.status(500).json({ error: "Failed to fetch signals" });
