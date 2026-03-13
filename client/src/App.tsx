@@ -7,6 +7,9 @@ import {
   DollarSign,
   Zap,
   CircleDot,
+  Target,
+  BarChart3,
+  Skull,
 } from "lucide-react";
 
 // ============================================================
@@ -30,6 +33,10 @@ interface Position {
   market_value: number;
   unrealized_pl: number;
   unrealized_pl_pct: number;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  pattern: string | null;
 }
 
 interface Signal {
@@ -49,6 +56,29 @@ interface Signal {
 interface Status {
   status: string;
   uptime: number;
+}
+
+interface Metrics {
+  win_rate: number;
+  profit_factor: number;
+  total_trades: number;
+  wins: number;
+  losses: number;
+}
+
+interface ClosedTrade {
+  symbol: string;
+  side: string;
+  qty: number;
+  filled_price: number;
+  submitted_at: string;
+  filled_at: string;
+  pattern: string | null;
+  direction: string | null;
+  entry_price: number | null;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
 }
 
 const POLL_INTERVAL = 10_000;
@@ -89,22 +119,30 @@ export default function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [history, setHistory] = useState<ClosedTrade[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes] = await Promise.allSettled([
-        fetch("/api/account").then((r) => r.json()),
-        fetch("/api/positions").then((r) => r.json()),
-        fetch("/api/signals").then((r) => r.json()),
-        fetch("/api/status").then((r) => r.json()),
-      ]);
+      const [acctRes, posRes, sigRes, statRes, metRes, histRes] =
+        await Promise.allSettled([
+          fetch("/api/account").then((r) => r.json()),
+          fetch("/api/positions").then((r) => r.json()),
+          fetch("/api/signals").then((r) => r.json()),
+          fetch("/api/status").then((r) => r.json()),
+          fetch("/api/metrics").then((r) => r.json()),
+          fetch("/api/history").then((r) => r.json()),
+        ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value))
         setPositions(posRes.value);
       if (sigRes.status === "fulfilled" && Array.isArray(sigRes.value))
         setSignals(sigRes.value);
       if (statRes.status === "fulfilled") setStatus(statRes.value);
+      if (metRes.status === "fulfilled") setMetrics(metRes.value);
+      if (histRes.status === "fulfilled" && Array.isArray(histRes.value))
+        setHistory(histRes.value);
     } catch {
       // silent — dashboard will show stale data
     } finally {
@@ -161,8 +199,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Stat Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* Stat Cards — Row 1: Account */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
           <StatCard
             icon={<DollarSign className="w-4 h-4 text-amber-400" />}
             label="Account Value"
@@ -196,11 +234,59 @@ export default function App() {
             value={String(positions.length)}
           />
         </div>
+
+        {/* Stat Cards — Row 2: Performance Matrix */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard
+            icon={<Target className="w-4 h-4 text-cyan-400" />}
+            label="Win Rate"
+            value={metrics ? `${metrics.win_rate}%` : "—"}
+            valueClass={
+              metrics && metrics.win_rate >= 50
+                ? "text-emerald-400"
+                : metrics && metrics.win_rate > 0
+                  ? "text-amber-400"
+                  : undefined
+            }
+            sub={metrics ? `${metrics.wins}W / ${metrics.losses}L` : undefined}
+          />
+          <StatCard
+            icon={<BarChart3 className="w-4 h-4 text-orange-400" />}
+            label="Profit Factor"
+            value={
+              metrics
+                ? metrics.profit_factor === Infinity
+                  ? "INF"
+                  : String(metrics.profit_factor)
+                : "—"
+            }
+            valueClass={
+              metrics && metrics.profit_factor >= 1.5
+                ? "text-emerald-400"
+                : metrics && metrics.profit_factor >= 1
+                  ? "text-amber-400"
+                  : metrics && metrics.profit_factor > 0
+                    ? "text-red-400"
+                    : undefined
+            }
+            sub={metrics && metrics.profit_factor >= 1.5 ? "Strong" : metrics && metrics.profit_factor >= 1 ? "Breakeven" : undefined}
+          />
+          <StatCard
+            icon={<Activity className="w-4 h-4 text-indigo-400" />}
+            label="Total Trades"
+            value={metrics ? String(metrics.total_trades) : "—"}
+          />
+          <StatCard
+            icon={<Zap className="w-4 h-4 text-amber-400" />}
+            label="Signals Detected"
+            value={String(signals.length)}
+          />
+        </div>
       </header>
 
-      {/* ==================== BODY: TWO COLUMNS ==================== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* LEFT: Positions */}
+      {/* ==================== BODY ==================== */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {/* LEFT: Active Positions (with SL/TP) */}
         <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
             <CircleDot className="w-4 h-4 text-blue-400" />
@@ -219,6 +305,8 @@ export default function App() {
                     <th className="text-right px-4 py-2">Qty</th>
                     <th className="text-right px-4 py-2">Entry</th>
                     <th className="text-right px-4 py-2">Current</th>
+                    <th className="text-right px-4 py-2">SL</th>
+                    <th className="text-right px-4 py-2">TP1</th>
                     <th className="text-right px-4 py-2">P&L</th>
                   </tr>
                 </thead>
@@ -228,7 +316,14 @@ export default function App() {
                       key={p.symbol}
                       className="border-b border-gray-800/50 hover:bg-gray-800/40"
                     >
-                      <td className="px-4 py-2.5 font-medium">{p.symbol}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="font-medium">{p.symbol}</span>
+                        {p.pattern && (
+                          <span className="text-xs text-gray-500 ml-1.5">
+                            {p.pattern}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 text-right text-gray-300">
                         {p.qty}
                       </td>
@@ -237,6 +332,12 @@ export default function App() {
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-300">
                         {formatUsd(p.current_price)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-red-400/80 text-xs">
+                        {p.stop_loss ? formatUsd(p.stop_loss) : "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-emerald-400/80 text-xs">
+                        {p.tp1 ? formatUsd(p.tp1) : "—"}
                       </td>
                       <td
                         className={`px-4 py-2.5 text-right font-medium ${
@@ -312,6 +413,78 @@ export default function App() {
           )}
         </section>
       </div>
+
+      {/* ==================== TRADE HISTORY (Graveyard) ==================== */}
+      <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+          <Skull className="w-4 h-4 text-gray-400" />
+          <h2 className="font-semibold text-sm">Trade History</h2>
+          <span className="text-xs text-gray-500 ml-auto">
+            {history.length} closed trades
+          </span>
+        </div>
+        {history.length === 0 ? (
+          <div className="p-8 text-center text-gray-500 text-sm">
+            No closed trades yet
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-400 text-xs border-b border-gray-800">
+                  <th className="text-left px-4 py-2">Symbol</th>
+                  <th className="text-left px-4 py-2">Side</th>
+                  <th className="text-right px-4 py-2">Qty</th>
+                  <th className="text-right px-4 py-2">Filled Price</th>
+                  <th className="text-right px-4 py-2">SL</th>
+                  <th className="text-right px-4 py-2">TP1</th>
+                  <th className="text-left px-4 py-2">Pattern</th>
+                  <th className="text-right px-4 py-2">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((t, i) => (
+                  <tr
+                    key={`${t.symbol}-${t.filled_at}-${i}`}
+                    className="border-b border-gray-800/50 hover:bg-gray-800/40"
+                  >
+                    <td className="px-4 py-2.5 font-medium">{t.symbol}</td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                          t.side === "buy"
+                            ? "bg-emerald-400/10 text-emerald-400"
+                            : "bg-red-400/10 text-red-400"
+                        }`}
+                      >
+                        {t.side.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-gray-300">
+                      {t.qty}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-gray-300">
+                      {formatUsd(t.filled_price)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-red-400/80 text-xs">
+                      {t.stop_loss ? formatUsd(t.stop_loss) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-emerald-400/80 text-xs">
+                      {t.tp1 ? formatUsd(t.tp1) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-400 text-xs">
+                      {t.pattern ?? "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-gray-500 text-xs whitespace-nowrap">
+                      {t.filled_at ? timeAgo(t.filled_at) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
