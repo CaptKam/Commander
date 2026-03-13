@@ -81,16 +81,35 @@ export async function ensureTablesExist(): Promise<void> {
         asset_class VARCHAR(20) NOT NULL DEFAULT 'equity'
       )
     `);
-    // Seed defaults if empty
+    // Seed full watchlist — crypto + equities
     await db.execute(sql`
       INSERT INTO watchlist (symbol, asset_class) VALUES
         ('BTC/USD', 'crypto'),
         ('ETH/USD', 'crypto'),
+        ('SOL/USD', 'crypto'),
+        ('XRP/USD', 'crypto'),
+        ('DOGE/USD', 'crypto'),
+        ('BNB/USD', 'crypto'),
+        ('ADA/USD', 'crypto'),
+        ('AVAX/USD', 'crypto'),
+        ('LINK/USD', 'crypto'),
+        ('LTC/USD', 'crypto'),
+        ('SUI/USD', 'crypto'),
         ('AAPL', 'equity'),
-        ('TSLA', 'equity')
+        ('TSLA', 'equity'),
+        ('NVDA', 'equity'),
+        ('AMZN', 'equity'),
+        ('META', 'equity'),
+        ('MSFT', 'equity'),
+        ('AMD', 'equity'),
+        ('GOOGL', 'equity'),
+        ('INTC', 'equity'),
+        ('SPY', 'equity'),
+        ('QQQ', 'equity'),
+        ('IWM', 'equity')
       ON CONFLICT (symbol) DO NOTHING
     `);
-    console.log("[DB] Table watchlist: OK (seeded defaults)");
+    console.log("[DB] Table watchlist: OK (23 symbols seeded)");
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS system_settings (

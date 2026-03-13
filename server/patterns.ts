@@ -176,8 +176,8 @@ export function detectHarmonics(
   }
 
   // Scan the last N pivots to find forming patterns
-  // We look at recent pivots only (last 20) to avoid ancient patterns
-  const recentPivots = pivots.slice(-20);
+  // With 365-day lookback we have enough density for 40 pivots
+  const recentPivots = pivots.slice(-40);
 
   for (let xi = 0; xi < recentPivots.length - 3; xi++) {
     const X = recentPivots[xi];
@@ -343,8 +343,8 @@ export function detectCompletedPatterns(
     return signals;
   }
 
-  // Only look at recent pivots (last 20)
-  const recentPivots = pivots.slice(-20);
+  // With 365-day lookback we have enough density for 40 pivots
+  const recentPivots = pivots.slice(-40);
 
   for (let xi = 0; xi < recentPivots.length - 4; xi++) {
     const X = recentPivots[xi];

@@ -16,6 +16,7 @@ import type { PhaseCSignal } from "./screener";
 import { runExitCycle } from "./exit-manager";
 import { runCryptoMonitor } from "./crypto-monitor";
 import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
+import { startPriceStreams, stopPriceStreams } from "./websocket-stream";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
@@ -363,11 +364,11 @@ async function runScanCycle(): Promise<void> {
       console.error("[Orchestrator] Exit cycle failed:", err);
     }
 
-    // ---- Crypto Monitor: price-based exit fallback for crypto positions ----
+    // ---- Position Monitor: real-time TP/SL checks via WebSocket prices ----
     try {
       await runCryptoMonitor();
     } catch (err) {
-      console.error("[Orchestrator] Crypto monitor failed:", err);
+      console.error("[Orchestrator] Position monitor failed:", err);
     }
 
     // ALWAYS release the lock, even if the scan threw
@@ -392,6 +393,14 @@ export async function startEngine(): Promise<void> {
     console.error("[Orchestrator] Failed to send boot notification:", err);
   }
 
+  // Start WebSocket price streams for real-time TP/SL monitoring
+  try {
+    const activeSymbols = await getActiveWatchlist();
+    startPriceStreams(activeSymbols);
+  } catch (err) {
+    console.error("[Orchestrator] Failed to start price streams (non-fatal):", err);
+  }
+
   // Run the first scan immediately (don't wait 30s)
   await runScanCycle();
 
@@ -407,7 +416,7 @@ export async function startEngine(): Promise<void> {
 }
 
 /**
- * Graceful shutdown — clears the interval so Node.js can exit cleanly.
+ * Graceful shutdown — clears the interval and WebSocket connections.
  */
 export function stopEngine(): void {
   if (scanIntervalId !== null) {
@@ -415,4 +424,5 @@ export function stopEngine(): void {
     scanIntervalId = null;
     console.log("[Orchestrator] Scanner loop stopped.");
   }
+  stopPriceStreams();
 }

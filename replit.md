@@ -25,8 +25,9 @@ server/         Express backend + trading engine
   screener.ts   Phase C signal filtering
   alpaca.ts     Alpaca order execution
   alpaca-data.ts  Alpaca market data (candle bars) + rate limiter
+  websocket-stream.ts  Real-time price streaming (crypto + stock WebSocket)
   exit-manager.ts  Automated TP/SL order lifecycle
-  crypto-monitor.ts  Price-based crypto position monitor
+  crypto-monitor.ts  Position monitor (TP/SL via streaming prices)
   quality-filters.ts  7-rule signal quality validation
 shared/
   schema.ts     Drizzle schema + Zod validation
