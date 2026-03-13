@@ -16,6 +16,7 @@ import {
   Settings,
   Power,
   Shield,
+  RefreshCw,
 } from "lucide-react";
 
 // ============================================================
@@ -148,6 +149,7 @@ export default function App() {
   const [newSymbol, setNewSymbol] = useState("");
   const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -440,6 +442,17 @@ export default function App() {
             <span className="text-xs text-gray-500 ml-auto">
               {signals.length} signals
             </span>
+            <button
+              onClick={async () => {
+                setRefreshing(true);
+                await fetchAll();
+                setRefreshing(false);
+              }}
+              className="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors"
+              title="Reload signals"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            </button>
           </div>
           {signals.length === 0 ? (
             <div className="p-8 text-center text-gray-500 text-sm">
