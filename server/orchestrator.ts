@@ -13,6 +13,7 @@ import { fetchWatchlist } from "./alpaca-data";
 import { detectHarmonics } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
+import { runExitCycle } from "./exit-manager";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
@@ -284,10 +285,10 @@ async function runScanCycle(): Promise<void> {
           console.error(`[Orchestrator] Telegram alert failed for ${signal.symbol}:`, alertErr);
         });
 
-        // ---- Insert into Neon DB ----
-        await db.insert(liveSignals).values(parsed);
+        // ---- Insert into Neon DB (returning ID for exit manager tracking) ----
+        const [inserted] = await db.insert(liveSignals).values(parsed).returning({ id: liveSignals.id });
         console.log(
-          `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern}`,
+          `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern} (id=${inserted.id})`,
         );
 
         // ---- Place limit order on Alpaca (only if equity was fetched AND trading enabled) ----
@@ -296,10 +297,15 @@ async function runScanCycle(): Promise<void> {
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
           );
         } else if (equity !== null) {
-          await placePhaseCLimitOrder(signal, equity, isCrypto, {
+          const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
             equity: settings.equityAllocation,
             crypto: settings.cryptoAllocation,
           });
+          // Save the Alpaca order ID so exit-manager can track fills
+          await db
+            .update(liveSignals)
+            .set({ entryOrderId: order.id })
+            .where(eq(liveSignals.id, inserted.id));
         } else {
           console.warn(
             `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
@@ -332,6 +338,15 @@ async function runScanCycle(): Promise<void> {
       console.error("[Orchestrator] Failed to send error notification");
     });
   } finally {
+    // ---- Exit Manager: check fills, place TP/SL, manage lifecycle ----
+    // Runs in finally so it executes even if the scan portion threw.
+    // Its own errors are caught internally — won't block the lock release.
+    try {
+      await runExitCycle();
+    } catch (err) {
+      console.error("[Orchestrator] Exit cycle failed:", err);
+    }
+
     // ALWAYS release the lock, even if the scan threw
     isScanning = false;
   }
