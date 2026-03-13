@@ -9,7 +9,7 @@
  */
 
 import { sendSystemBoot, sendError, sendPhaseCSignal } from "./utils/notifier";
-import { fetchWatchlist } from "./fmp";
+import { fetchWatchlist } from "./alpaca-data";
 import { detectHarmonics } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
@@ -35,7 +35,8 @@ async function getActiveWatchlist(): Promise<string[]> {
   try {
     const entries = await db.select().from(watchlist);
     if (entries.length === 0) return FALLBACK_WATCHLIST;
-    return entries.map((e) => e.symbol);
+    // Auto-correct any USDT pairs → USD (Alpaca only supports USD pairs)
+    return entries.map((e) => e.symbol.replace(/\/USDT$/, "/USD"));
   } catch (err) {
     console.error("[Orchestrator] Failed to load watchlist from DB, using fallback:", err);
     return FALLBACK_WATCHLIST;

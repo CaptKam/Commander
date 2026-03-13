@@ -7,7 +7,7 @@ import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
-import { getCacheStats } from "./fmp";
+import { getCacheStats } from "./alpaca-data";
 
 const router = Router();
 
@@ -344,7 +344,11 @@ router.post("/watchlist", async (req, res) => {
       return res.status(400).json({ error: "symbol is required" });
     }
 
-    const clean = symbol.trim().toUpperCase();
+    let clean = symbol.trim().toUpperCase();
+
+    // Auto-correct USDT pairs → USD (Alpaca only supports USD pairs)
+    clean = clean.replace(/\/USDT$/, "/USD");
+
     const cls = clean.includes("/") ? "crypto" : (asset_class ?? "equity");
 
     await db
