@@ -5,8 +5,8 @@
 
 import { Router } from "express";
 import { db } from "./db";
-import { liveSignals } from "../shared/schema";
-import { desc } from "drizzle-orm";
+import { liveSignals, watchlist } from "../shared/schema";
+import { desc, eq } from "drizzle-orm";
 import { getCacheStats } from "./fmp";
 
 const router = Router();
@@ -297,6 +297,68 @@ router.get("/history", async (_req, res) => {
   } catch (err) {
     console.error("[API] Failed to fetch history:", err);
     res.status(500).json({ error: "Failed to fetch history" });
+  }
+});
+
+// ============================================================
+// Watchlist CRUD
+// ============================================================
+
+/**
+ * GET /api/watchlist — Returns all watchlist symbols.
+ */
+router.get("/watchlist", async (_req, res) => {
+  try {
+    const entries = await db.select().from(watchlist);
+    res.json(entries);
+  } catch (err) {
+    console.error("[API] Failed to fetch watchlist:", err);
+    res.status(500).json({ error: "Failed to fetch watchlist" });
+  }
+});
+
+/**
+ * POST /api/watchlist — Add a symbol to the watchlist.
+ * Body: { symbol: string, asset_class?: "crypto" | "equity" }
+ */
+router.post("/watchlist", async (req, res) => {
+  try {
+    const { symbol, asset_class } = req.body as {
+      symbol?: string;
+      asset_class?: string;
+    };
+    if (!symbol || typeof symbol !== "string" || symbol.trim().length === 0) {
+      return res.status(400).json({ error: "symbol is required" });
+    }
+
+    const clean = symbol.trim().toUpperCase();
+    const cls = clean.includes("/") ? "crypto" : (asset_class ?? "equity");
+
+    await db
+      .insert(watchlist)
+      .values({ symbol: clean, assetClass: cls })
+      .onConflictDoNothing();
+
+    console.log(`[API] Watchlist: added ${clean} (${cls})`);
+    res.json({ ok: true, symbol: clean, asset_class: cls });
+  } catch (err) {
+    console.error("[API] Failed to add to watchlist:", err);
+    res.status(500).json({ error: "Failed to add symbol" });
+  }
+});
+
+/**
+ * DELETE /api/watchlist/:symbol — Remove a symbol from the watchlist.
+ */
+router.delete("/watchlist/:symbol", async (req, res) => {
+  try {
+    const sym = decodeURIComponent(req.params.symbol).toUpperCase();
+    await db.delete(watchlist).where(eq(watchlist.symbol, sym));
+    console.log(`[API] Watchlist: removed ${sym}`);
+    res.json({ ok: true, removed: sym });
+  } catch (err) {
+    console.error("[API] Failed to remove from watchlist:", err);
+    res.status(500).json({ error: "Failed to remove symbol" });
   }
 });
 

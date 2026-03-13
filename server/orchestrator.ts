@@ -15,7 +15,7 @@ import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
-import { liveSignals, insertLiveSignalSchema } from "../shared/schema";
+import { liveSignals, insertLiveSignalSchema, watchlist } from "../shared/schema";
 
 // ============================================================
 // Scan interval and heartbeat configuration
@@ -24,10 +24,22 @@ const SCAN_INTERVAL_MS = 30_000; // 30 seconds between scans
 const HEARTBEAT_EVERY_N_SCANS = 10; // Log heartbeat every 10th cycle (~5 min)
 
 // ============================================================
-// Watchlist — initial live test symbols
+// Watchlist — loaded from DB at the start of each scan cycle
+// Fallback to defaults if DB query fails
 // ============================================================
-const WATCHLIST = ["BTC/USD", "ETH/USD", "AAPL", "TSLA"];
+const FALLBACK_WATCHLIST = ["BTC/USD", "ETH/USD", "AAPL", "TSLA"];
 const TIMEFRAMES = ["1D", "4H"] as const;
+
+async function getActiveWatchlist(): Promise<string[]> {
+  try {
+    const entries = await db.select().from(watchlist);
+    if (entries.length === 0) return FALLBACK_WATCHLIST;
+    return entries.map((e) => e.symbol);
+  } catch (err) {
+    console.error("[Orchestrator] Failed to load watchlist from DB, using fallback:", err);
+    return FALLBACK_WATCHLIST;
+  }
+}
 
 // ============================================================
 // State lock — prevents overlapping scans (CLAUDE.md Rule #2)
@@ -90,13 +102,18 @@ async function runScanCycle(): Promise<void> {
     // ============================================================
     // Step 1: Fetch candle data from Alpaca for both timeframes
     // ============================================================
+    const activeSymbols = await getActiveWatchlist();
+    console.log(
+      `[Orchestrator] Scan #${scanCount}: watching ${activeSymbols.length} symbols: ${activeSymbols.join(", ")}`,
+    );
+
     const allCandleData = new Map<
       string,
       { candles: Awaited<ReturnType<typeof fetchWatchlist>> extends Map<string, infer V> ? V : never; timeframe: "1D" | "4H" }[]
     >();
 
     for (const tf of TIMEFRAMES) {
-      const watchlistData = await fetchWatchlist(WATCHLIST, tf);
+      const watchlistData = await fetchWatchlist(activeSymbols, tf);
       for (const [symbol, candles] of watchlistData) {
         if (!allCandleData.has(symbol)) allCandleData.set(symbol, []);
         allCandleData.get(symbol)!.push({ candles, timeframe: tf });
