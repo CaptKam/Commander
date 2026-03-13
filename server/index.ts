@@ -25,7 +25,7 @@ const distPath = path.join(__dirname, "../dist");
 app.use(express.static(distPath));
 
 // Fallback for React routing
-app.get("*", (_req, res) => {
+app.get("/{*splat}", (_req, res) => {
   res.sendFile(path.join(distPath, "index.html"), (err) => {
     if (err) {
       res.status(200).send("Pattern Bot is running. Dashboard not built yet.");
