@@ -1,0 +1,184 @@
+/**
+ * Alpaca Execution Engine — Phase 5
+ * Takes validated Phase C signals and places live limit orders.
+ *
+ * CLAUDE.md Rule #1: All qty/price values pass through Anti-422 formatters.
+ * CLAUDE.md Rule #4: Alpaca failures trigger Discord alerts, never silent.
+ */
+
+import { formatAlpacaQty, formatAlpacaPrice } from "./utils/alpacaFormatters";
+import { sendError } from "./utils/notifier";
+import type { PhaseCSignal } from "./screener";
+
+// ============================================================
+// Environment — fail fast if keys are missing at import time
+// ============================================================
+const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+const ALPACA_BASE_URL =
+  process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
+
+// ============================================================
+// Position sizing constants
+// ============================================================
+const CRYPTO_ALLOCATION = 0.07; // 7% of equity per crypto trade
+const EQUITY_ALLOCATION = 0.05; // 5% of equity per stock trade
+
+// ============================================================
+// Alpaca API types
+// ============================================================
+interface AlpacaOrderPayload {
+  symbol: string;
+  qty: string;
+  side: "buy" | "sell";
+  type: "limit";
+  time_in_force: "gtc";
+  limit_price: string;
+}
+
+interface AlpacaOrderResponse {
+  id: string;
+  client_order_id: string;
+  status: string;
+  symbol: string;
+  qty: string;
+  filled_qty: string;
+  side: string;
+  type: string;
+  limit_price: string;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Fetches current account equity from Alpaca.
+ */
+export async function getAccountEquity(): Promise<number> {
+  assertKeysPresent();
+
+  const res = await fetch(`${ALPACA_BASE_URL}/v2/account`, {
+    headers: {
+      "APCA-API-KEY-ID": ALPACA_API_KEY!,
+      "APCA-API-SECRET-KEY": ALPACA_API_SECRET!,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Alpaca account fetch failed: ${res.status} — ${body}`);
+  }
+
+  const account = (await res.json()) as { equity: string };
+  const equity = Number(account.equity);
+
+  if (!Number.isFinite(equity) || equity <= 0) {
+    throw new Error(
+      `Alpaca account equity is invalid: ${account.equity}`,
+    );
+  }
+
+  return equity;
+}
+
+/**
+ * Places a Phase C limit order on Alpaca.
+ *
+ * Flow:
+ *   1. Calculate position size (7% crypto / 5% equity)
+ *   2. Compute raw qty from allocated funds and limit price
+ *   3. Format qty and price through Anti-422 sanitizers
+ *   4. POST to Alpaca /v2/orders
+ *   5. On failure: fire Discord alert, then re-throw
+ */
+export async function placePhaseCLimitOrder(
+  signal: PhaseCSignal,
+  accountEquity: number,
+  isCrypto: boolean,
+): Promise<AlpacaOrderResponse> {
+  assertKeysPresent();
+
+  // ---- Step 1: Position sizing ----
+  const allocation = isCrypto ? CRYPTO_ALLOCATION : EQUITY_ALLOCATION;
+  const allocatedFunds = accountEquity * allocation;
+
+  // ---- Step 2: Raw quantity ----
+  const rawQty = allocatedFunds / signal.limitPrice;
+
+  // ---- Step 3: Anti-422 formatting (CLAUDE.md Rule #1) ----
+  const safeQty = formatAlpacaQty(rawQty, isCrypto);
+  const safePrice = formatAlpacaPrice(signal.limitPrice, isCrypto);
+
+  // ---- Step 4: Build and send order ----
+  const side: "buy" | "sell" = signal.direction === "long" ? "buy" : "sell";
+
+  const payload: AlpacaOrderPayload = {
+    symbol: signal.symbol,
+    qty: String(safeQty),
+    side,
+    type: "limit",
+    time_in_force: "gtc",
+    limit_price: String(safePrice),
+  };
+
+  console.log(
+    `[Alpaca] Placing ${side} limit order: ${signal.symbol} ` +
+      `qty=${safeQty} price=${safePrice} ` +
+      `(${(allocation * 100).toFixed(0)}% of $${accountEquity.toFixed(2)})`,
+  );
+
+  try {
+    const res = await fetch(`${ALPACA_BASE_URL}/v2/orders`, {
+      method: "POST",
+      headers: {
+        "APCA-API-KEY-ID": ALPACA_API_KEY!,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      const err = new Error(
+        `Alpaca order rejected: ${res.status} — ${body}`,
+      );
+      // Fire Discord alert so your phone knows immediately
+      await sendError(
+        `Alpaca Limit Order Failed: ${signal.symbol} ${signal.pattern} ${side}`,
+        err,
+      );
+      throw err;
+    }
+
+    const order = (await res.json()) as AlpacaOrderResponse;
+    console.log(
+      `[Alpaca] Order accepted: ${order.id} status=${order.status}`,
+    );
+    return order;
+  } catch (err) {
+    // Catch network errors (not just HTTP errors handled above)
+    if (
+      !(
+        err instanceof Error &&
+        err.message.startsWith("Alpaca order rejected")
+      )
+    ) {
+      await sendError(
+        `Alpaca Limit Order Failed (network): ${signal.symbol} ${signal.pattern} ${side}`,
+        err,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Guards against missing API keys — fails loud at call time.
+ */
+function assertKeysPresent(): void {
+  if (!ALPACA_API_KEY || !ALPACA_API_SECRET) {
+    throw new Error(
+      "[Alpaca] ALPACA_API_KEY and ALPACA_API_SECRET must be set in .env",
+    );
+  }
+}
