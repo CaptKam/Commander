@@ -1,9 +1,9 @@
 /**
  * Orchestrator — The Unkillable Scanner Loop
- * Central brain that ties FMP data, harmonic detection, Phase C screening,
- * and Alpaca execution into a single resilient loop.
+ * Central brain that ties Alpaca market data, harmonic detection, Phase C
+ * screening, and Alpaca execution into a single resilient loop.
  *
- * Key safety feature: Mutex lock prevents overlapping scans. If FMP takes
+ * Key safety feature: Mutex lock prevents overlapping scans. If Alpaca takes
  * 40 seconds and the 30-second interval fires again, it skips gracefully
  * instead of stacking requests until Node.js OOMs.
  */
@@ -64,7 +64,7 @@ async function runScanCycle(): Promise<void> {
     }
 
     // ============================================================
-    // Step 1: Fetch candle data from FMP for both timeframes
+    // Step 1: Fetch candle data from Alpaca for both timeframes
     // ============================================================
     const allCandleData = new Map<
       string,
@@ -119,9 +119,19 @@ async function runScanCycle(): Promise<void> {
 
     // ============================================================
     // Step 4: Fetch equity, save to DB, execute orders
+    // Equity fetch is wrapped in try/catch so a temporary Alpaca
+    // outage doesn't kill the scan — signals still get logged.
     // ============================================================
-    const equity = await getAccountEquity();
-    console.log(`[Orchestrator] Account equity: $${equity.toFixed(2)}`);
+    let equity: number | null = null;
+    try {
+      equity = await getAccountEquity();
+      console.log(`[Orchestrator] Account equity: $${equity.toFixed(2)}`);
+    } catch (err) {
+      console.error("[Orchestrator] Failed to fetch Alpaca equity:", err);
+      sendError("Alpaca equity fetch failed — signals detected but orders skipped", err).catch(() => {
+        console.error("[Orchestrator] Failed to send error notification");
+      });
+    }
 
     for (const signal of validSignals) {
       const isCrypto = signal.symbol.includes("/");
@@ -145,8 +155,14 @@ async function runScanCycle(): Promise<void> {
           `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern}`,
         );
 
-        // ---- Place limit order on Alpaca ----
-        await placePhaseCLimitOrder(signal, equity, isCrypto);
+        // ---- Place limit order on Alpaca (only if equity was fetched) ----
+        if (equity !== null) {
+          await placePhaseCLimitOrder(signal, equity, isCrypto);
+        } else {
+          console.warn(
+            `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
+          );
+        }
       } catch (err) {
         console.error(
           `[Orchestrator] Failed to execute signal ${signal.symbol}:`,
@@ -165,7 +181,7 @@ async function runScanCycle(): Promise<void> {
     const elapsed = Date.now() - cycleStart;
     console.log(
       `[Orchestrator] Scan #${scanCount} complete (${elapsed}ms) — ` +
-        `${validSignals.length} signals executed`,
+        `${validSignals.length} signals processed`,
     );
   } catch (err) {
     console.error("[Orchestrator] Scan cycle failed:", err);

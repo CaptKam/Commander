@@ -11,6 +11,30 @@
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// ============================================================
+// Alert deduplication — prevents spamming the same message.
+// Keyed by a short fingerprint, value is the expiry timestamp.
+// This is ephemeral (resets on restart) and does not represent
+// trade data, so it complies with CLAUDE.md Rule #2.
+// ============================================================
+const recentAlerts = new Map<string, number>();
+const ERROR_COOLDOWN_MS = 10 * 60 * 1000; // 10 min cooldown for identical errors
+const SIGNAL_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hour cooldown for identical signals
+
+function isDuplicate(key: string, cooldownMs: number): boolean {
+  const now = Date.now();
+  const expiresAt = recentAlerts.get(key);
+  if (expiresAt && expiresAt > now) return true;
+  recentAlerts.set(key, now + cooldownMs);
+  // Lazy cleanup: purge expired entries when map grows large
+  if (recentAlerts.size > 200) {
+    for (const [k, v] of recentAlerts) {
+      if (v <= now) recentAlerts.delete(k);
+    }
+  }
+  return false;
+}
+
 // TradingView interval mapping: our timeframes -> TV format
 const TV_INTERVAL_MAP: Record<string, string> = {
   "1D": "D",
@@ -80,6 +104,13 @@ export async function sendError(
 ): Promise<void> {
   const errorMessage =
     error instanceof Error ? error.message : String(error);
+
+  // Dedup: same context + message = same alert. Don't spam.
+  const dedupKey = `error:${context}:${errorMessage}`;
+  if (isDuplicate(dedupKey, ERROR_COOLDOWN_MS)) {
+    return;
+  }
+
   const errorStack =
     error instanceof Error && error.stack
       ? error.stack.slice(0, 800)
@@ -104,6 +135,12 @@ export async function sendPhaseCSignal(
   direction: string,
   limitPrice: number,
 ): Promise<void> {
+  // Dedup: same symbol + timeframe + pattern + direction = same signal.
+  const dedupKey = `signal:${symbol}:${timeframe}:${pattern}:${direction}`;
+  if (isDuplicate(dedupKey, SIGNAL_COOLDOWN_MS)) {
+    return;
+  }
+
   const tvInterval = TV_INTERVAL_MAP[timeframe] ?? "D";
   const tvUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${tvInterval}`;
   const directionEmoji = direction === "long" ? "🟢" : "🔴";
