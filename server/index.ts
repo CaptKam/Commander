@@ -21,11 +21,16 @@ app.use(express.json());
 app.use("/api", apiRouter);
 
 // 2. Serve static frontend files (if they exist)
-const distPath = path.join(__dirname, "../dist");
+// Try multiple possible dist locations (Docker vs local dev)
+const distPath = path.resolve(
+  process.cwd(),
+  "dist",
+);
+console.log(`[Boot] Serving static files from: ${distPath}`);
 app.use(express.static(distPath));
 
-// Fallback for React routing
-app.get("/{*splat}", (_req, res) => {
+// Fallback for React routing — only for non-API, non-asset paths
+app.use((_req, res) => {
   res.sendFile(path.join(distPath, "index.html"), (err) => {
     if (err) {
       res.status(200).send("Pattern Bot is running. Dashboard not built yet.");
