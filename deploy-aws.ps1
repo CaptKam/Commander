@@ -81,7 +81,7 @@ Write-Host "[ECS] Registering task definition..." -ForegroundColor Cyan
 # Auto-replace ACCOUNT_ID placeholder in task definition
 $taskDefContent = Get-Content -Path "gogotrade-task.json" -Raw
 $taskDefContent = $taskDefContent -replace "ACCOUNT_ID", $ACCOUNT_ID
-$tempTaskDef = "gogotrade-task-resolved.json"
+$tempTaskDef = Join-Path $PSScriptRoot "gogotrade-task-resolved.json"
 [System.IO.File]::WriteAllText($tempTaskDef, $taskDefContent, (New-Object System.Text.UTF8Encoding $false))
 
 aws ecs register-task-definition `
