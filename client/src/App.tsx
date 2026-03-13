@@ -55,6 +55,10 @@ interface Signal {
   stopLossPrice: string;
   tp1Price: string;
   tp2Price: string;
+  xPrice: string | null;
+  aPrice: string | null;
+  bPrice: string | null;
+  cPrice: string | null;
   status: string;
   createdAt: string;
 }
@@ -471,6 +475,11 @@ export default function App() {
                       {" · "}TP1 {formatUsd(Number(s.tp1Price))}
                       {" · "}TP2 {formatUsd(Number(s.tp2Price))}
                     </div>
+                    {s.xPrice && (
+                      <div className="text-xs text-gray-600 mt-0.5 font-mono">
+                        X={formatUsd(Number(s.xPrice))} A={formatUsd(Number(s.aPrice))} B={formatUsd(Number(s.bPrice))} C={formatUsd(Number(s.cPrice))}
+                      </div>
+                    )}
                   </div>
                   <span className="text-xs text-gray-500 whitespace-nowrap">
                     {timeAgo(s.createdAt)}

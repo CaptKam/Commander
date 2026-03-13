@@ -266,6 +266,10 @@ async function runScanCycle(): Promise<void> {
           stopLossPrice: String(signal.stopLossPrice),
           tp1Price: String(signal.tp1Price),
           tp2Price: String(signal.tp2Price),
+          xPrice: String(signal.xPrice),
+          aPrice: String(signal.aPrice),
+          bPrice: String(signal.bPrice),
+          cPrice: String(signal.cPrice),
         });
 
         // ---- Telegram alert: only fires for truly new signals ----
