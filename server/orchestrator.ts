@@ -152,7 +152,7 @@ async function runScanCycle(): Promise<void> {
           `[Orchestrator] Failed to execute signal ${signal.symbol}:`,
           err,
         );
-        // Fire Discord alert — per-signal failure doesn't kill the loop
+        // Fire Telegram alert — per-signal failure doesn't kill the loop
         sendError(
           `Signal execution failed: ${signal.symbol} ${signal.pattern}`,
           err,
@@ -169,7 +169,7 @@ async function runScanCycle(): Promise<void> {
     );
   } catch (err) {
     console.error("[Orchestrator] Scan cycle failed:", err);
-    // Fire Discord alert — but don't let a notification failure crash the loop
+    // Fire Telegram alert — but don't let a notification failure crash the loop
     sendError(`Scan cycle #${scanCount} failed`, err).catch(() => {
       console.error("[Orchestrator] Failed to send error notification");
     });
@@ -185,7 +185,7 @@ async function runScanCycle(): Promise<void> {
 export async function startEngine(): Promise<void> {
   console.log("[Orchestrator] Booting Pattern Bot engine...");
 
-  // Fire the green "online" Discord embed
+  // Fire the green "online" Telegram notification
   try {
     await sendSystemBoot();
   } catch (err) {
