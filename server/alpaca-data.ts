@@ -5,17 +5,19 @@
  *   - Stocks: GET https://data.alpaca.markets/v2/stocks/bars?symbols=...
  *   - Crypto: GET https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols=...
  *
- * Free tier rate limits (monitored and enforced here):
- *   - 200 requests/minute
- *   - Burst: ~10 requests/second
+ * SIP feed enabled for full market data coverage.
  *
- * Cache TTLs are generous to stay well under the limit:
- *   - "1D" candles: 2 hours (daily bars don't change intraday)
+ * Rate limits (monitored and enforced here):
+ *   - 200 requests/minute (free tier)
+ *   - Warns at 80% utilization, throws at 100%
+ *
+ * Lookback windows:
+ *   - "1D": 365 days (1 year — deep pivot history for pattern detection)
+ *   - "4H": 90 days (3 months of 4-hour candles)
+ *
+ * Cache TTLs:
+ *   - "1D" candles: 2 hours (daily bars are static intraday)
  *   - "4H" candles: 5 minutes (balances freshness vs API budget)
- *
- * At 30s scan intervals with 4 symbols × 2 timeframes, we make
- * at most ~4 uncached API calls per cycle (stocks batched, crypto batched).
- * With caching, most cycles make 0 calls. Well within 200/min.
  *
  * NOTE: This in-memory cache is strictly for API rate-limiting. It does
  * NOT store trade state, so it complies with CLAUDE.md Rule #2.
@@ -147,9 +149,9 @@ function getDateRange(timeframe: "1D" | "4H"): { start: string; end: string } {
   const end = new Date();
   const start = new Date();
   if (timeframe === "1D") {
-    start.setDate(start.getDate() - 90);
+    start.setDate(start.getDate() - 365); // 1 year — deep pivot history
   } else {
-    start.setDate(start.getDate() - 15);
+    start.setDate(start.getDate() - 90);  // 3 months of 4H candles
   }
   return {
     start: start.toISOString(),
@@ -192,7 +194,7 @@ async function fetchStockBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
-  checkRateLimit(); // Free tier: 200/min guard
+  checkRateLimit(); // 200/min guard
 
   const { start, end } = getDateRange(timeframe);
   const alpacaTf = toAlpacaTimeframe(timeframe);
@@ -253,7 +255,7 @@ async function fetchCryptoBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
-  checkRateLimit(); // Free tier: 200/min guard
+  checkRateLimit(); // 200/min guard
 
   const { start, end } = getDateRange(timeframe);
   const alpacaTf = toAlpacaTimeframe(timeframe);

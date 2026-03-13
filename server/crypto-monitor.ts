@@ -1,10 +1,10 @@
 /**
- * Crypto Position Monitor — Price-Based Exit Fallback
+ * Crypto & Stock Position Monitor — Real-Time Exit Engine
  *
- * Complements the order-based exit-manager by directly monitoring
- * live crypto positions against TP/SL price levels. This catches
- * edge cases where Alpaca exit orders fail or aren't placed.
+ * Uses WebSocket streaming prices for instant TP/SL detection.
+ * Falls back to Alpaca REST position data if no stream price available.
  *
+ * Monitors BOTH crypto and stock positions against TP/SL levels.
  * Called every scan cycle alongside runExitCycle().
  *
  * CLAUDE.md Rule #1: All quantities pass through Anti-422 formatters.
@@ -16,6 +16,7 @@ import { liveSignals } from "../shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { formatAlpacaQty } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
+import { getStreamPrice } from "./websocket-stream";
 
 // ============================================================
 // Environment
@@ -24,7 +25,7 @@ function getAlpacaConfig() {
   const key = process.env.ALPACA_API_KEY;
   const secret = process.env.ALPACA_API_SECRET;
   if (!key || !secret) {
-    throw new Error("[CryptoMonitor] ALPACA_API_KEY and ALPACA_API_SECRET must be set");
+    throw new Error("[PositionMonitor] ALPACA_API_KEY and ALPACA_API_SECRET must be set");
   }
   const rawBase = process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
   const base = rawBase.replace(/\/v2\/?$/, "");
@@ -86,15 +87,14 @@ async function closePosition(
 }
 
 // ============================================================
-// Main crypto monitor cycle
+// Main position monitor cycle — crypto AND stocks
+// Uses WebSocket streaming prices when available, falls back
+// to Alpaca REST position current_price.
 // ============================================================
 export async function runCryptoMonitor(): Promise<void> {
   try {
     const positions = await getPositions();
-
-    // Filter to crypto positions only (symbol contains "/")
-    const cryptoPositions = positions.filter((p) => p.symbol.includes("/"));
-    if (cryptoPositions.length === 0) return;
+    if (positions.length === 0) return;
 
     // Load matching signals from DB
     const activeSignals = await db
@@ -102,12 +102,18 @@ export async function runCryptoMonitor(): Promise<void> {
       .from(liveSignals)
       .where(inArray(liveSignals.status, ["filled", "partial_exit"]));
 
-    for (const pos of cryptoPositions) {
-      const currentPrice = Number(pos.current_price);
+    if (activeSignals.length === 0) return;
+
+    for (const pos of positions) {
       const posQty = Number(pos.qty);
+      const isCrypto = pos.symbol.includes("/");
+
+      // Use WebSocket streaming price if available, else REST fallback
+      const streamPrice = getStreamPrice(pos.symbol);
+      const currentPrice = streamPrice ?? Number(pos.current_price);
+      const priceSource = streamPrice ? "stream" : "rest";
 
       // Find matching signal — normalize symbol for comparison
-      // Alpaca may return "BTC/USD" or "BTCUSD" depending on context
       const normalizedSymbol = pos.symbol.replace(/\//g, "");
       const signal = activeSignals.find((s) => {
         const normalizedSignalSymbol = s.symbol.replace(/\//g, "");
@@ -121,13 +127,12 @@ export async function runCryptoMonitor(): Promise<void> {
       const tp2 = Number(signal.tp2Price);
       const sl = Number(signal.stopLossPrice);
       const isLong = signal.direction === "long";
-      const isCrypto = true;
 
       // ---- Check SL hit ----
       const slHit = isLong ? currentPrice <= sl : currentPrice >= sl;
       if (slHit) {
         console.log(
-          `[CryptoMonitor] SL HIT: ${pos.symbol} current=$${currentPrice} SL=$${sl} — closing full position`,
+          `[PositionMonitor] SL HIT: ${pos.symbol} ${priceSource}=$${currentPrice} SL=$${sl} — closing full position`,
         );
         try {
           const safeQty = formatAlpacaQty(posQty, isCrypto);
@@ -136,10 +141,10 @@ export async function runCryptoMonitor(): Promise<void> {
             .update(liveSignals)
             .set({ status: "closed" })
             .where(eq(liveSignals.id, signal.id));
-          console.log(`[CryptoMonitor] Position closed and signal #${signal.id} marked closed`);
+          console.log(`[PositionMonitor] Position closed and signal #${signal.id} marked closed`);
         } catch (err) {
-          console.error(`[CryptoMonitor] Failed to close SL position ${pos.symbol}:`, err);
-          sendError(`CryptoMonitor SL close failed: ${pos.symbol}`, err).catch(() => {});
+          console.error(`[PositionMonitor] Failed to close SL position ${pos.symbol}:`, err);
+          sendError(`PositionMonitor SL close failed: ${pos.symbol}`, err).catch(() => {});
         }
         continue;
       }
@@ -149,7 +154,7 @@ export async function runCryptoMonitor(): Promise<void> {
         const tp1Hit = isLong ? currentPrice >= tp1 : currentPrice <= tp1;
         if (tp1Hit) {
           console.log(
-            `[CryptoMonitor] TP1 HIT: ${pos.symbol} current=$${currentPrice} TP1=$${tp1} — closing 50%`,
+            `[PositionMonitor] TP1 HIT: ${pos.symbol} ${priceSource}=$${currentPrice} TP1=$${tp1} — closing 50%`,
           );
           try {
             const halfQty = posQty / 2;
@@ -159,10 +164,10 @@ export async function runCryptoMonitor(): Promise<void> {
               .update(liveSignals)
               .set({ status: "partial_exit" })
               .where(eq(liveSignals.id, signal.id));
-            console.log(`[CryptoMonitor] 50% closed, signal #${signal.id} → partial_exit`);
+            console.log(`[PositionMonitor] 50% closed, signal #${signal.id} → partial_exit`);
           } catch (err) {
-            console.error(`[CryptoMonitor] Failed to close TP1 position ${pos.symbol}:`, err);
-            sendError(`CryptoMonitor TP1 close failed: ${pos.symbol}`, err).catch(() => {});
+            console.error(`[PositionMonitor] Failed to close TP1 position ${pos.symbol}:`, err);
+            sendError(`PositionMonitor TP1 close failed: ${pos.symbol}`, err).catch(() => {});
           }
           continue;
         }
@@ -173,7 +178,7 @@ export async function runCryptoMonitor(): Promise<void> {
         const tp2Hit = isLong ? currentPrice >= tp2 : currentPrice <= tp2;
         if (tp2Hit) {
           console.log(
-            `[CryptoMonitor] TP2 HIT: ${pos.symbol} current=$${currentPrice} TP2=$${tp2} — closing remaining`,
+            `[PositionMonitor] TP2 HIT: ${pos.symbol} ${priceSource}=$${currentPrice} TP2=$${tp2} — closing remaining`,
           );
           try {
             const safeQty = formatAlpacaQty(posQty, isCrypto);
@@ -182,17 +187,17 @@ export async function runCryptoMonitor(): Promise<void> {
               .update(liveSignals)
               .set({ status: "closed" })
               .where(eq(liveSignals.id, signal.id));
-            console.log(`[CryptoMonitor] Remaining closed, signal #${signal.id} → closed`);
+            console.log(`[PositionMonitor] Remaining closed, signal #${signal.id} → closed`);
           } catch (err) {
-            console.error(`[CryptoMonitor] Failed to close TP2 position ${pos.symbol}:`, err);
-            sendError(`CryptoMonitor TP2 close failed: ${pos.symbol}`, err).catch(() => {});
+            console.error(`[PositionMonitor] Failed to close TP2 position ${pos.symbol}:`, err);
+            sendError(`PositionMonitor TP2 close failed: ${pos.symbol}`, err).catch(() => {});
           }
           continue;
         }
       }
     }
   } catch (err) {
-    console.error("[CryptoMonitor] Monitor cycle failed:", err);
-    sendError("Crypto monitor cycle failed", err).catch(() => {});
+    console.error("[PositionMonitor] Monitor cycle failed:", err);
+    sendError("Position monitor cycle failed", err).catch(() => {});
   }
 }
