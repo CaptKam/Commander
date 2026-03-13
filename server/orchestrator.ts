@@ -35,12 +35,26 @@ const HEARTBEAT_EVERY_N_SCANS = 10; // Log heartbeat every 10th cycle (~5 min)
 const FALLBACK_WATCHLIST = ["BTC/USD", "ETH/USD", "AAPL", "TSLA"];
 const TIMEFRAMES = ["1D", "4H"] as const;
 
+// Known crypto base symbols — if these appear without "/USD", auto-append it
+const KNOWN_CRYPTO_BASES = new Set([
+  "BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "AVAX", "LINK", "LTC", "SUI",
+]);
+
 async function getActiveWatchlist(): Promise<string[]> {
   try {
     const entries = await db.select().from(watchlist);
     if (entries.length === 0) return FALLBACK_WATCHLIST;
-    // Auto-correct any USDT pairs → USD (Alpaca only supports USD pairs)
-    return entries.map((e) => e.symbol.replace(/\/USDT$/, "/USD"));
+    return entries.map((e) => {
+      let sym = e.symbol;
+      // Auto-correct USDT pairs → USD (Alpaca only supports USD pairs)
+      sym = sym.replace(/\/USDT$/, "/USD");
+      // Auto-correct bare crypto tickers: "XRP" → "XRP/USD"
+      if (!sym.includes("/") && KNOWN_CRYPTO_BASES.has(sym.toUpperCase())) {
+        console.warn(`[Orchestrator] Auto-correcting bare crypto symbol: "${sym}" → "${sym.toUpperCase()}/USD"`);
+        sym = `${sym.toUpperCase()}/USD`;
+      }
+      return sym;
+    });
   } catch (err) {
     console.error("[Orchestrator] Failed to load watchlist from DB, using fallback:", err);
     return FALLBACK_WATCHLIST;
