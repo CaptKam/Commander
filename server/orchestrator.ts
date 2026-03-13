@@ -96,6 +96,49 @@ async function getSettings(): Promise<BotSettings> {
 }
 
 // ============================================================
+// Market hours — skip equity symbols when US stock market is closed
+// Crypto scans 24/7 regardless.
+// ============================================================
+function getEasternTime(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+}
+
+/**
+ * Returns true if within the extended stock scanning window:
+ * Mon-Fri 9:00 AM – 4:30 PM Eastern (30-min buffer each side of 9:30–4:00).
+ */
+function isStockMarketOpen(): boolean {
+  const eastern = getEasternTime();
+  const day = eastern.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+
+  const timeInMinutes = eastern.getHours() * 60 + eastern.getMinutes();
+  // 9:00 AM = 540 min, 4:30 PM = 990 min
+  if (timeInMinutes < 540 || timeInMinutes > 990) return false;
+
+  return true;
+}
+
+/**
+ * Returns true once per trading day during the 4:30–5:00 PM window.
+ * Used to trigger a final daily-candle scan for stocks after close.
+ */
+function isPostCloseWindow(): boolean {
+  const eastern = getEasternTime();
+  const day = eastern.getDay();
+  if (day === 0 || day === 6) return false;
+
+  const timeInMinutes = eastern.getHours() * 60 + eastern.getMinutes();
+  // 4:30 PM = 990, 5:00 PM = 1020
+  return timeInMinutes >= 990 && timeInMinutes <= 1020;
+}
+
+// Track daily stock scan: stores the date string (YYYY-MM-DD) of the last
+// completed post-close daily scan so we only do it once per day.
+// Resets naturally each calendar day. Ephemeral — not trade state.
+let lastDailyStockScanDate: string | null = null;
+
+// ============================================================
 // State lock — prevents overlapping scans (CLAUDE.md Rule #2)
 // These are ephemeral by nature (reset on restart) and do not
 // represent trade data, so they comply with Rule #2.
@@ -159,11 +202,39 @@ async function runScanCycle(): Promise<void> {
     const settings = await getSettings();
 
     // ============================================================
-    // Step 1: Fetch candle data from Alpaca for both timeframes
+    // Step 1: Determine which symbols to scan based on market hours
+    // Crypto: always. Equities: only during extended market hours
+    // or once after close for the daily candle.
     // ============================================================
     const activeSymbols = await getActiveWatchlist();
+    const marketOpen = isStockMarketOpen();
+    const postClose = isPostCloseWindow();
+    const todayDate = getEasternTime().toISOString().slice(0, 10);
+    const dailyScanDone = lastDailyStockScanDate === todayDate;
+
+    // Decide which symbols to scan
+    const cryptoSymbols = activeSymbols.filter((s) => s.includes("/"));
+    const equitySymbols = activeSymbols.filter((s) => !s.includes("/"));
+
+    // Include equities if market is open, OR during post-close window for daily candle (once)
+    const includeEquities = marketOpen || (postClose && !dailyScanDone);
+    const symbolsToScan = includeEquities
+      ? activeSymbols
+      : cryptoSymbols;
+
+    // Decide timeframes: if post-close only scan, only fetch 1D for stocks
+    const timeframesToScan: Array<"1D" | "4H"> = [...TIMEFRAMES];
+
+    if (!marketOpen && postClose && !dailyScanDone) {
+      console.log(
+        `[Orchestrator] Market CLOSED — post-close daily scan for ${equitySymbols.length} equities`,
+      );
+    }
+
     console.log(
-      `[Orchestrator] Scan #${scanCount}: watching ${activeSymbols.length} symbols: ${activeSymbols.join(", ")}`,
+      `[Orchestrator] Scan #${scanCount}: Market ${marketOpen ? "OPEN" : "CLOSED"} — ` +
+        `scanning ${symbolsToScan.length}/${activeSymbols.length} symbols ` +
+        `(${cryptoSymbols.length} crypto${includeEquities ? ` + ${equitySymbols.length} equity` : ", equities skipped"})`,
     );
 
     const allCandleData = new Map<
@@ -171,12 +242,28 @@ async function runScanCycle(): Promise<void> {
       { candles: Awaited<ReturnType<typeof fetchWatchlist>> extends Map<string, infer V> ? V : never; timeframe: "1D" | "4H" }[]
     >();
 
-    for (const tf of TIMEFRAMES) {
-      const watchlistData = await fetchWatchlist(activeSymbols, tf);
+    for (const tf of timeframesToScan) {
+      // For post-close daily scan: only fetch 1D for equities, all TFs for crypto
+      let fetchSymbols: string[];
+      if (!marketOpen && postClose && !dailyScanDone) {
+        // Post-close: crypto gets all TFs, equities only get 1D
+        fetchSymbols = tf === "1D" ? symbolsToScan : cryptoSymbols;
+      } else {
+        fetchSymbols = symbolsToScan;
+      }
+      if (fetchSymbols.length === 0) continue;
+
+      const watchlistData = await fetchWatchlist(fetchSymbols, tf);
       for (const [symbol, candles] of watchlistData) {
         if (!allCandleData.has(symbol)) allCandleData.set(symbol, []);
         allCandleData.get(symbol)!.push({ candles, timeframe: tf });
       }
+    }
+
+    // Mark daily stock scan as done if we just ran the post-close scan
+    if (!marketOpen && postClose && !dailyScanDone && includeEquities) {
+      lastDailyStockScanDate = todayDate;
+      console.log(`[Orchestrator] Post-close daily stock scan complete for ${todayDate}`);
     }
 
     // ============================================================
