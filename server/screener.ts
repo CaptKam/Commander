@@ -1,12 +1,13 @@
 /**
  * Phase C Screener — Forming Pattern Detection
- * Scans candle data for XABCD harmonic structures approaching point D.
+ * Filters XABCD harmonic candidates by pattern rules.
  *
  * CLAUDE.md Rule #3: Crab and Deep Crab are globally DISABLED.
- * CLAUDE.md Rule #4: Telegram notification failures must not crash the scan loop.
+ *
+ * NOTE: Telegram alerts are NOT sent here. Alerts are sent by the
+ * orchestrator AFTER the DB dedup check passes, to prevent duplicate
+ * notifications on restarts or repeated scans.
  */
-
-import { sendPhaseCSignal, sendError } from "./utils/notifier";
 
 // ============================================================
 // Rule #3: Globally disabled patterns (low win rate)
@@ -57,7 +58,7 @@ export function isPatternAllowed(
 }
 
 // ============================================================
-// Phase C scan — detects forming patterns and fires alerts
+// Phase C scan — filters valid forming patterns (no alerts here)
 // ============================================================
 export async function processPhaseCSignals(
   candidates: PhaseCSignal[],
@@ -71,25 +72,6 @@ export async function processPhaseCSignals(
     }
 
     validSignals.push(candidate);
-
-    // ---- Fire Telegram alert (non-blocking) ----
-    // Uses .catch() instead of await to prevent notification failures
-    // from blocking the scan loop (CLAUDE.md Rule #4: Decoupled Architecture)
-    sendPhaseCSignal(
-      candidate.symbol,
-      candidate.timeframe,
-      candidate.pattern,
-      candidate.direction,
-      candidate.limitPrice,
-    ).catch((err) => {
-      sendError(
-        `Telegram alert failed for ${candidate.symbol} ${candidate.pattern}`,
-        err,
-      ).catch(() => {
-        // Last resort: if even the error notification fails, just log
-        console.error("[Screener] Failed to send error notification:", err);
-      });
-    });
   }
 
   return validSignals;

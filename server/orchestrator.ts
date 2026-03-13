@@ -8,7 +8,7 @@
  * instead of stacking requests until Node.js OOMs.
  */
 
-import { sendSystemBoot, sendError } from "./utils/notifier";
+import { sendSystemBoot, sendError, sendPhaseCSignal } from "./utils/notifier";
 import { fetchWatchlist } from "./fmp";
 import { detectHarmonics } from "./patterns";
 import { processPhaseCSignals } from "./screener";
@@ -16,7 +16,7 @@ import type { PhaseCSignal } from "./screener";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist } from "../shared/schema";
-import { desc, and, eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 
 // ============================================================
 // Scan interval and heartbeat configuration
@@ -184,8 +184,12 @@ async function runScanCycle(): Promise<void> {
         continue;
       }
 
-      // ---- Layer 2: DB dedup — check if this exact signal already exists ----
+      // ---- Layer 2: DB dedup with time window ----
+      // 4H timeframe → look back 4 hours, 1D → look back 24 hours
       try {
+        const windowMs = signal.timeframe === "4H" ? 4 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+        const timeWindow = new Date(Date.now() - windowMs);
+
         const existing = await db
           .select({ id: liveSignals.id })
           .from(liveSignals)
@@ -195,13 +199,14 @@ async function runScanCycle(): Promise<void> {
               eq(liveSignals.timeframe, signal.timeframe),
               eq(liveSignals.patternType, signal.pattern),
               eq(liveSignals.direction, signal.direction),
+              gte(liveSignals.createdAt, timeWindow),
             ),
           )
           .limit(1);
 
         if (existing.length > 0) {
           console.log(
-            `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (already in DB)`,
+            `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (exists in DB within ${signal.timeframe} window)`,
           );
           continue;
         }
@@ -222,6 +227,17 @@ async function runScanCycle(): Promise<void> {
           stopLossPrice: String(signal.stopLossPrice),
           tp1Price: String(signal.tp1Price),
           tp2Price: String(signal.tp2Price),
+        });
+
+        // ---- Telegram alert: only fires for truly new signals ----
+        sendPhaseCSignal(
+          signal.symbol,
+          signal.timeframe,
+          signal.pattern,
+          signal.direction,
+          signal.limitPrice,
+        ).catch((alertErr) => {
+          console.error(`[Orchestrator] Telegram alert failed for ${signal.symbol}:`, alertErr);
         });
 
         // ---- Insert into Neon DB ----

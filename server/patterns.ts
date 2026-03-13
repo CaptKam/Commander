@@ -199,12 +199,12 @@ export function detectHarmonics(
       }
 
       // ---- Project D ----
-      // D completes as a retracement/extension of XA from C
-      // For patterns where XAD < 1: D retraces into XA range
-      // For patterns where XAD > 1: D extends beyond X
-      const xaLeg = A.price - X.price;
+      // D completes as a retracement of the XA leg measured FROM A back
+      // toward X. For retracement patterns (XAD < 1), D falls between
+      // A and X. For extension patterns (XAD > 1), D extends beyond X.
+      const xaLeg = X.price - A.price; // signed: positive if X > A
       const midXAD = (pattern.xad.min + pattern.xad.max) / 2;
-      const projectedD = X.price + xaLeg * midXAD;
+      const projectedD = A.price + xaLeg * midXAD;
 
       // ---- Determine direction ----
       // If A is a high (X was low → XA went up), D will be a low → long
