@@ -34,23 +34,16 @@ app.get("*", (_req, res) => {
 });
 
 // 3. Hybrid Boot
-async function boot() {
+// CRITICAL: Express must bind the port FIRST so Render's health check passes.
+// The trading engine starts AFTER the port is open.
+app.listen(PORT, () => {
   console.log("-----------------------------------------");
   console.log("  PATTERN BOT HYBRID BOOT INITIALIZED");
   console.log("-----------------------------------------");
+  console.log(`[Boot] Visual Dashboard: ACTIVE on port ${PORT}`);
 
-  // Start the 24/7 Trading Engine
-  try {
-    await startEngine();
-    console.log("[Boot] Trading Engine: ACTIVE");
-  } catch (err) {
-    console.error("[Boot] Trading Engine: FAILED TO START", err);
-  }
-
-  // Start the Web Server
-  app.listen(PORT, () => {
-    console.log(`[Boot] Visual Dashboard: ACTIVE on port ${PORT}`);
-  });
-}
-
-boot();
+  // Start the 24/7 Trading Engine after port is bound
+  startEngine()
+    .then(() => console.log("[Boot] Trading Engine: ACTIVE"))
+    .catch((err) => console.error("[Boot] Trading Engine: FAILED TO START", err));
+});
