@@ -16,8 +16,9 @@ import type { PhaseCSignal } from "./screener";
 // ============================================================
 let ALPACA_API_KEY = process.env.ALPACA_API_KEY;
 let ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
-const ALPACA_BASE_URL =
+const rawAlpacaBase =
   process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
+const ALPACA_BASE_URL = rawAlpacaBase.replace(/\/v2\/?$/, "");
 
 // ============================================================
 // Position sizing constants

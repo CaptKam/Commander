@@ -1,21 +1,25 @@
 /**
- * Database Connection — Neon PostgreSQL via Drizzle ORM
+ * Database Connection — PostgreSQL via Drizzle ORM
  * Provides a shared db instance for all server modules.
  *
  * NOTE: Does NOT throw at import time. If DATABASE_URL is missing the
  * db object will be null and callers must handle that gracefully.
  */
 
-import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
+import pkg from "pg";
 import * as schema from "../shared/schema";
+
+const { Pool } = pkg;
 
 function createDb() {
   if (!process.env.DATABASE_URL) {
     console.error("[DB] DATABASE_URL is not set — database features disabled");
     return null;
   }
-  return drizzle(process.env.DATABASE_URL, { schema });
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  return drizzle(pool, { schema });
 }
 
 export const db = createDb()!;

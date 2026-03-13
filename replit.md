@@ -1,43 +1,71 @@
-# Pattern Bot — Replit Agent Instructions
+# Pattern Bot
 
 > **Read `CLAUDE.md` first.** It contains the full architecture rules, critical system constraints, and pattern exclusions. Everything in `CLAUDE.md` applies here. The rules below are Replit-specific additions.
 
-## How to Run
+An automated harmonic pattern detection and execution system. Scans crypto and equity markets across 1-day and 4-hour timeframes, detects XABCD harmonic structures, and places live trades via the Alpaca API.
 
-```bash
-# Install dependencies
-npm ci --legacy-peer-deps
+## Tech Stack
 
-# Build the React dashboard
-npm run build
-
-# Start the hybrid server (Dashboard + Trading Engine)
-node --import tsx server/index.ts
-```
-
-The app serves the dashboard on port 3000 and boots the trading engine in the same process.
+- **Frontend:** React 19, Vite 7, Tailwind CSS 4 (in `client/`)
+- **Backend:** Node.js, Express 5, TypeScript (in `server/`)
+- **Database:** PostgreSQL via Drizzle ORM (Replit built-in Postgres)
+- **Trading API:** Alpaca (paper/live trading + market data)
+- **Notifications:** Telegram bot (optional)
 
 ## Project Structure
 
 ```
-server/
-  index.ts          # Express server + engine boot (entry point)
-  orchestrator.ts   # 24/7 trading engine loop
-  api.ts            # Dashboard REST API routes
-  screener.ts       # Harmonic pattern scanner (Phase C)
-  executor.ts       # Alpaca order execution
-  db/
-    schema.ts       # Drizzle ORM schema (PostgreSQL)
-client/
-  src/
-    App.tsx         # React dashboard (single-page)
+client/         React frontend dashboard
+server/         Express backend + trading engine
+  index.ts      Entry point (boots Express + trading engine)
+  api.ts        REST API routes (/api/*)
+  db.ts         Drizzle ORM database connection
+  orchestrator.ts  Main scanner loop (30s interval)
+  patterns.ts   Harmonic pattern detection (XABCD)
+  screener.ts   Phase C signal filtering
+  alpaca.ts     Alpaca order execution
+  fmp.ts        FMP market data fetching
+shared/
+  schema.ts     Drizzle schema + Zod validation
 ```
 
-## Replit-Specific Rules
+## Development
+
+- `npm run dev:all` — starts both frontend (port 5000) and backend (port 3000) concurrently
+- `npm run dev` — frontend only (Vite on port 5000)
+- `npm run dev:server` — backend only (Express on port 3000)
+- `npm run build` — builds frontend to `dist/`
+- `npm start` — production mode (serves built frontend + runs trading engine)
+
+## Environment Variables
+
+Required for full functionality (see `.env.example`):
+- `DATABASE_URL` — PostgreSQL connection string (auto-set by Replit)
+- `ALPACA_API_KEY` — Alpaca API key
+- `ALPACA_API_SECRET` — Alpaca API secret
+- `ALPACA_BASE_URL` — Alpaca endpoint (default: paper trading)
+- `TELEGRAM_BOT_TOKEN` — Telegram bot token (optional, for notifications)
+- `TELEGRAM_CHAT_ID` — Telegram chat ID (optional)
+
+## Deployment
+
+Configured as a VM deployment (always-running) to support the 24/7 trading engine loop.
+Build step: `npm run build` (compiles React frontend)
+Run command: `npm start` (Express serves static frontend + runs trading engine on port 3000)
+
+## Architecture Notes
+
+- The Vite dev server (port 5000) proxies `/api/*` requests to the Express backend (port 3000)
+- In production, Express serves the built frontend statically and handles all requests on port 3000
+- Database is Replit's built-in PostgreSQL; `ensureTablesExist()` auto-creates schema at boot
+- Trading engine runs as a mutex-locked scan loop to prevent overlapping API calls
+- Crab and Deep Crab patterns are globally disabled (low win rates)
+
+## Replit Agent Rules
 
 1. **Entry Point:** `node --import tsx server/index.ts` — do NOT change this to `npx ts-node` or add a separate dev server.
 2. **Build Output:** Vite builds to `dist/` at the project root. The Express server serves static files from `process.cwd()/dist`. Do not change this path.
-3. **Environment Variables:** All secrets (Alpaca keys, DB URL, FMP key) are in Replit Secrets. NEVER hardcode API keys or connection strings.
+3. **Environment Variables:** All secrets are in Replit Secrets. NEVER hardcode API keys or connection strings.
 4. **Paper Trading Only:** Always use `https://paper-api.alpaca.markets`. Never default to the live endpoint.
 5. **No Mock Data:** Never hardcode fake prices, fake positions, or test JSON. Always pull from the real Alpaca paper account or the PostgreSQL database.
 6. **Database:** PostgreSQL via Drizzle ORM only. Do not use raw SQL strings or add a second ORM.

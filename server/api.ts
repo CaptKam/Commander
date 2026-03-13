@@ -12,8 +12,8 @@ import { getCacheStats } from "./fmp";
 const router = Router();
 
 // Alpaca trading API base (NOT market data)
-const ALPACA_BASE_URL =
-  process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
+const rawBase = process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
+const ALPACA_BASE_URL = rawBase.replace(/\/v2\/?$/, "");
 
 function alpacaHeaders(): Record<string, string> | null {
   const key = process.env.ALPACA_API_KEY;
