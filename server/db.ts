@@ -45,11 +45,22 @@ export async function ensureTablesExist(): Promise<void> {
         stop_loss_price NUMERIC(20,10) NOT NULL,
         tp1_price NUMERIC(20,10) NOT NULL,
         tp2_price NUMERIC(20,10) NOT NULL,
+        x_price NUMERIC(20,10),
+        a_price NUMERIC(20,10),
+        b_price NUMERIC(20,10),
+        c_price NUMERIC(20,10),
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT NOW() NOT NULL,
         executed_at TIMESTAMP
       )
     `);
+
+    // Add pivot columns to existing tables (safe to run repeatedly)
+    for (const col of ["x_price", "a_price", "b_price", "c_price"]) {
+      await db.execute(sql.raw(
+        `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS ${col} NUMERIC(20,10)`
+      ));
+    }
     console.log("[DB] Table live_signals: OK");
 
     await db.execute(sql`

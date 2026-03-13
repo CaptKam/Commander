@@ -254,6 +254,14 @@ export function detectHarmonics(
         continue;
       }
 
+      console.log(
+        `[Harmonics] ${symbol} ${timeframe} ${pattern.name} ${direction.toUpperCase()} — ` +
+          `X=$${X.price.toFixed(2)}(idx${X.index}) A=$${A.price.toFixed(2)}(idx${A.index}) ` +
+          `B=$${B.price.toFixed(2)}(idx${B.index}) C=$${C.price.toFixed(2)}(idx${C.index}) → ` +
+          `D=$${projectedD.toFixed(2)} | XAB=${xabRatio.toFixed(3)} ABC=${abcRatio.toFixed(3)} ` +
+          `XAD=${midXAD.toFixed(3)} | SL=$${stopLossPrice.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)}`,
+      );
+
       signals.push({
         symbol,
         timeframe,
