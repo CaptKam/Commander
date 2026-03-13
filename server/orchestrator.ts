@@ -14,7 +14,7 @@ import { detectHarmonics } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
-import { db } from "./db";
+import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema } from "../shared/schema";
 
 // ============================================================
@@ -232,6 +232,9 @@ async function runScanCycle(): Promise<void> {
 // ============================================================
 export async function startEngine(): Promise<void> {
   console.log("[Orchestrator] Booting Pattern Bot engine...");
+
+  // Ensure DB tables exist before first scan
+  await ensureTablesExist();
 
   // Fire the green "online" Telegram notification
   try {
