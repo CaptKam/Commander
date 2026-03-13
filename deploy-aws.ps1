@@ -90,13 +90,16 @@ Write-Host "=========================================" -ForegroundColor Green
 Write-Host "  AWS Deployment Complete!" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Next step — create the ECS Service (replace SUBNET and SG IDs):" -ForegroundColor Yellow
+Write-Host "Next step - create the ECS Service (replace SUBNET and SG IDs):" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "aws ecs create-service ``" -ForegroundColor White
-Write-Host "    --cluster $ECS_CLUSTER_NAME ``" -ForegroundColor White
-Write-Host "    --service-name gogotrade-service ``" -ForegroundColor White
-Write-Host "    --task-definition gogotrade ``" -ForegroundColor White
-Write-Host "    --desired-count 1 ``" -ForegroundColor White
-Write-Host "    --launch-type FARGATE ``" -ForegroundColor White
-Write-Host "    --network-configuration 'awsvpcConfiguration={subnets=[subnet-XXXX],securityGroups=[sg-XXXX],assignPublicIp=ENABLED}' ``" -ForegroundColor White
-Write-Host "    --region $AWS_REGION" -ForegroundColor White
+$serviceCmd = @"
+aws ecs create-service ``
+    --cluster $ECS_CLUSTER_NAME ``
+    --service-name gogotrade-service ``
+    --task-definition gogotrade ``
+    --desired-count 1 ``
+    --launch-type FARGATE ``
+    --network-configuration "awsvpcConfiguration={subnets=[subnet-XXXX],securityGroups=[sg-XXXX],assignPublicIp=ENABLED}" ``
+    --region $AWS_REGION
+"@
+Write-Host $serviceCmd -ForegroundColor White
