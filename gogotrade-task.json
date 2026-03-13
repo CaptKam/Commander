@@ -22,10 +22,6 @@
           "value": "REPLACE_WITH_YOUR_NEON_CONNECTION_STRING"
         },
         {
-          "name": "FMP_API_KEY",
-          "value": "REPLACE_WITH_YOUR_FMP_API_KEY"
-        },
-        {
           "name": "ALPACA_API_KEY",
           "value": "REPLACE_WITH_YOUR_ALPACA_KEY"
         },
