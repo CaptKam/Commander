@@ -331,7 +331,11 @@ router.post("/watchlist", async (req, res) => {
       return res.status(400).json({ error: "symbol is required" });
     }
 
-    const clean = symbol.trim().toUpperCase();
+    let clean = symbol.trim().toUpperCase();
+
+    // Auto-correct USDT pairs → USD (Alpaca only supports USD pairs)
+    clean = clean.replace(/\/USDT$/, "/USD");
+
     const cls = clean.includes("/") ? "crypto" : (asset_class ?? "equity");
 
     await db
