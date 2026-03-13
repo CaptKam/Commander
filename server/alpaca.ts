@@ -11,10 +11,11 @@ import { sendError } from "./utils/notifier";
 import type { PhaseCSignal } from "./screener";
 
 // ============================================================
-// Environment — fail fast if keys are missing at import time
+// Environment — validated at call time, NOT import time.
+// A missing key logs an error but does NOT crash the process.
 // ============================================================
-const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
-const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+let ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+let ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
 const ALPACA_BASE_URL =
   process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
 
@@ -173,9 +174,13 @@ export async function placePhaseCLimitOrder(
 }
 
 /**
- * Guards against missing API keys — fails loud at call time.
+ * Re-reads API keys from process.env and throws if missing.
+ * Must be called at the start of every public function so keys
+ * set after module load (e.g. late dotenv init) are picked up.
  */
 function assertKeysPresent(): void {
+  ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+  ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
   if (!ALPACA_API_KEY || !ALPACA_API_SECRET) {
     throw new Error(
       "[Alpaca] ALPACA_API_KEY and ALPACA_API_SECRET must be set in .env",
