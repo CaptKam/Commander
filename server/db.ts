@@ -81,7 +81,15 @@ export async function ensureTablesExist(): Promise<void> {
         asset_class VARCHAR(20) NOT NULL DEFAULT 'equity'
       )
     `);
+    // Fix any bare crypto tickers from previous seeds (e.g. "XRP" → "XRP/USD")
+    for (const base of ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "AVAX", "LINK", "LTC", "SUI"]) {
+      await db.execute(sql.raw(
+        `DELETE FROM watchlist WHERE symbol = '${base}'`
+      ));
+    }
+
     // Seed full watchlist — crypto + equities
+    // ON CONFLICT DO NOTHING means existing correct entries are preserved
     await db.execute(sql`
       INSERT INTO watchlist (symbol, asset_class) VALUES
         ('BTC/USD', 'crypto'),

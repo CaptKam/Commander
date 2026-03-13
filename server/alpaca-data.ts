@@ -183,7 +183,30 @@ function barToCandle(bar: AlpacaBar): Candle {
 }
 
 // ============================================================
-// Stock bars fetcher (batched — up to 200 symbols per request)
+// Shared pagination helper
+// Alpaca's limit is shared across ALL symbols in a multi-symbol
+// request. With 12 stocks × 540 4H candles = 6480 bars, the
+// first page gets truncated. Must follow next_page_token.
+// Max 10 pages to prevent runaway loops on free tier.
+// ============================================================
+const MAX_PAGES = 10;
+
+function appendBars(
+  results: Map<string, AlpacaBar[]>,
+  bars: Record<string, AlpacaBar[]>,
+): void {
+  for (const [sym, newBars] of Object.entries(bars)) {
+    const existing = results.get(sym);
+    if (existing) {
+      existing.push(...newBars);
+    } else {
+      results.set(sym, [...newBars]);
+    }
+  }
+}
+
+// ============================================================
+// Stock bars fetcher (batched + paginated)
 // ============================================================
 async function fetchStockBars(
   symbols: string[],
@@ -194,49 +217,76 @@ async function fetchStockBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
-  checkRateLimit(); // 200/min guard
-
   const { start, end } = getDateRange(timeframe);
   const alpacaTf = toAlpacaTimeframe(timeframe);
+  const allBars = new Map<string, AlpacaBar[]>();
 
-  const url =
-    `${ALPACA_DATA_BASE}/v2/stocks/bars` +
-    `?symbols=${symbols.map(encodeURIComponent).join(",")}` +
-    `&timeframe=${alpacaTf}` +
-    `&start=${encodeURIComponent(start)}` +
-    `&end=${encodeURIComponent(end)}` +
-    `&limit=10000` +
-    `&adjustment=split` +
-    `&feed=sip`;
+  let pageToken: string | null = null;
+  let page = 0;
 
-  const res = await fetch(url, {
-    headers: {
-      "APCA-API-KEY-ID": key,
-      "APCA-API-SECRET-KEY": secret,
-    },
-  });
+  do {
+    checkRateLimit(); // 200/min guard
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(
-      `[MarketData] Alpaca stock bars error: ${res.status} — ${body}`,
-    );
+    let url =
+      `${ALPACA_DATA_BASE}/v2/stocks/bars` +
+      `?symbols=${symbols.map(encodeURIComponent).join(",")}` +
+      `&timeframe=${alpacaTf}` +
+      `&start=${encodeURIComponent(start)}` +
+      `&end=${encodeURIComponent(end)}` +
+      `&limit=10000` +
+      `&adjustment=split` +
+      `&feed=sip`;
+    if (pageToken) {
+      url += `&page_token=${encodeURIComponent(pageToken)}`;
+    }
+
+    if (page === 0) {
+      console.log(`[MarketData] Stock bars URL: ${url.split("?")[0]}?... (${symbols.length} symbols, ${alpacaTf})`);
+    }
+
+    const res = await fetch(url, {
+      headers: {
+        "APCA-API-KEY-ID": key,
+        "APCA-API-SECRET-KEY": secret,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(
+        `[MarketData] Alpaca stock bars error: ${res.status} — ${body}`,
+      );
+    }
+
+    const json = (await res.json()) as {
+      bars: Record<string, AlpacaBar[]>;
+      next_page_token: string | null;
+    };
+
+    if (json.bars) {
+      appendBars(allBars, json.bars);
+    }
+
+    pageToken = json.next_page_token;
+    page++;
+
+    if (pageToken) {
+      console.log(`[MarketData] Stock bars page ${page}: fetching next page...`);
+    }
+  } while (pageToken && page < MAX_PAGES);
+
+  if (page >= MAX_PAGES && pageToken) {
+    console.warn(`[MarketData] Stock bars: hit max ${MAX_PAGES} pages, some data may be truncated`);
   }
 
-  const json = (await res.json()) as {
-    bars: Record<string, AlpacaBar[]>;
-    next_page_token: string | null;
-  };
-
-  if (json.bars) {
-    for (const [sym, bars] of Object.entries(json.bars)) {
-      const candles = bars
-        .map(barToCandle)
-        .filter((c) => c.open > 0 && c.high > 0)
-        .sort((a, b) => a.timestamp - b.timestamp);
-      if (candles.length > 0) {
-        results.set(sym, candles);
-      }
+  // Convert raw bars to candles
+  for (const [sym, bars] of allBars) {
+    const candles = bars
+      .map(barToCandle)
+      .filter((c) => c.open > 0 && c.high > 0)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (candles.length > 0) {
+      results.set(sym, candles);
     }
   }
 
@@ -244,7 +294,7 @@ async function fetchStockBars(
 }
 
 // ============================================================
-// Crypto bars fetcher (batched)
+// Crypto bars fetcher (batched + paginated)
 // ============================================================
 async function fetchCryptoBars(
   symbols: string[],
@@ -255,48 +305,75 @@ async function fetchCryptoBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
-  checkRateLimit(); // 200/min guard
-
   const { start, end } = getDateRange(timeframe);
   const alpacaTf = toAlpacaTimeframe(timeframe);
+  const allBars = new Map<string, AlpacaBar[]>();
 
-  // Alpaca crypto uses slash format natively (BTC/USD) — no conversion needed
-  const url =
-    `${ALPACA_DATA_BASE}/v1beta3/crypto/us/bars` +
-    `?symbols=${symbols.map(encodeURIComponent).join(",")}` +
-    `&timeframe=${alpacaTf}` +
-    `&start=${encodeURIComponent(start)}` +
-    `&end=${encodeURIComponent(end)}` +
-    `&limit=10000`;
+  let pageToken: string | null = null;
+  let page = 0;
 
-  const res = await fetch(url, {
-    headers: {
-      "APCA-API-KEY-ID": key,
-      "APCA-API-SECRET-KEY": secret,
-    },
-  });
+  do {
+    checkRateLimit(); // 200/min guard
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(
-      `[MarketData] Alpaca crypto bars error: ${res.status} — ${body}`,
-    );
+    // Alpaca crypto uses slash format natively (BTC/USD) — no conversion needed
+    let url =
+      `${ALPACA_DATA_BASE}/v1beta3/crypto/us/bars` +
+      `?symbols=${symbols.map(encodeURIComponent).join(",")}` +
+      `&timeframe=${alpacaTf}` +
+      `&start=${encodeURIComponent(start)}` +
+      `&end=${encodeURIComponent(end)}` +
+      `&limit=10000`;
+    if (pageToken) {
+      url += `&page_token=${encodeURIComponent(pageToken)}`;
+    }
+
+    if (page === 0) {
+      console.log(`[MarketData] Crypto bars URL: ${url.split("?")[0]}?... (${symbols.length} symbols, ${alpacaTf})`);
+    }
+
+    const res = await fetch(url, {
+      headers: {
+        "APCA-API-KEY-ID": key,
+        "APCA-API-SECRET-KEY": secret,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(
+        `[MarketData] Alpaca crypto bars error: ${res.status} — ${body}`,
+      );
+    }
+
+    const json = (await res.json()) as {
+      bars: Record<string, AlpacaBar[]>;
+      next_page_token: string | null;
+    };
+
+    if (json.bars) {
+      appendBars(allBars, json.bars);
+    }
+
+    pageToken = json.next_page_token;
+    page++;
+
+    if (pageToken) {
+      console.log(`[MarketData] Crypto bars page ${page}: fetching next page...`);
+    }
+  } while (pageToken && page < MAX_PAGES);
+
+  if (page >= MAX_PAGES && pageToken) {
+    console.warn(`[MarketData] Crypto bars: hit max ${MAX_PAGES} pages, some data may be truncated`);
   }
 
-  const json = (await res.json()) as {
-    bars: Record<string, AlpacaBar[]>;
-    next_page_token: string | null;
-  };
-
-  if (json.bars) {
-    for (const [sym, bars] of Object.entries(json.bars)) {
-      const candles = bars
-        .map(barToCandle)
-        .filter((c) => c.open > 0 && c.high > 0)
-        .sort((a, b) => a.timestamp - b.timestamp);
-      if (candles.length > 0) {
-        results.set(sym, candles);
-      }
+  // Convert raw bars to candles
+  for (const [sym, bars] of allBars) {
+    const candles = bars
+      .map(barToCandle)
+      .filter((c) => c.open > 0 && c.high > 0)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (candles.length > 0) {
+      results.set(sym, candles);
     }
   }
 

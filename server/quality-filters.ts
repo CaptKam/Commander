@@ -183,20 +183,22 @@ export function validateSignalQuality(
   for (const candidate of candidates) {
     const result = checkQuality(candidate);
     if (result.passed) {
+      console.log(
+        `[Quality] PASS: ${candidate.symbol} ${candidate.pattern} ${candidate.timeframe} ` +
+        `${candidate.direction.toUpperCase()} — all 7 rules passed`,
+      );
       passed.push(candidate);
     } else {
       console.log(
-        `[Quality] REJECTED ${candidate.symbol} ${candidate.pattern} ${candidate.timeframe} ` +
+        `[Quality] REJECTED: ${candidate.symbol} ${candidate.pattern} ${candidate.timeframe} ` +
         `${candidate.direction.toUpperCase()} — Rule ${result.rule}: ${result.reason}`,
       );
     }
   }
 
-  if (candidates.length > 0) {
-    console.log(
-      `[Quality] ${passed.length}/${candidates.length} candidates passed quality filters`,
-    );
-  }
+  console.log(
+    `[Quality] ${passed.length}/${candidates.length} candidates passed quality filters`,
+  );
 
   return passed;
 }
