@@ -1,7 +1,9 @@
 /**
- * FMP Data Ingestion & Caching Layer — Phase 7
- * Fetches candle data from Financial Modeling Prep with an intelligent
- * in-memory cache to prevent rate-limit bans.
+ * FMP Data Ingestion & Caching Layer — Phase 7 (FIXED for New API Keys)
+ *
+ * FIXES:
+ * 1. Switches from 'historical-price-full' (Legacy) to 'historical-chart' (Modern).
+ * 2. Sanitizes symbols (removes "/" for Crypto compatibility).
  *
  * Cache TTLs:
  *   - "1D" candles: 6 hours (daily bars don't change intraday)
@@ -46,91 +48,47 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
+/**
+ * FMP requires symbols without slashes (BTCUSD, not BTC/USD).
+ */
+function sanitizeSymbol(symbol: string): string {
+  return symbol.replace("/", "").toUpperCase();
+}
+
 function getCacheKey(symbol: string, timeframe: string): string {
   return `${symbol}:${timeframe}`;
 }
 
 // ============================================================
-// Raw FMP response types (their API shape, not ours)
+// FMP API endpoints — using /api/v3/historical-chart for ALL requests
+// The 'historical-chart' endpoint works for both daily and intraday
+// with newer API keys, avoiding 403 Legacy errors.
 // ============================================================
-interface FmpDailyCandle {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-interface FmpDailyResponse {
-  symbol: string;
-  historical: FmpDailyCandle[];
-}
-
-interface FmpIntradayCandle {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-// ============================================================
-// FMP API endpoints — using /stable/ base (v3 is legacy/deprecated)
-// See: https://site.financialmodelingprep.com/developer/docs
-// ============================================================
-const FMP_BASE = "https://financialmodelingprep.com/stable";
+const FMP_BASE = "https://financialmodelingprep.com/api/v3";
 
 /**
- * Converts our symbol format to FMP's format.
- * FMP uses "BTCUSD" not "BTC/USD" for crypto pairs.
+ * Uses the 'historical-chart' endpoint for ALL requests to avoid 403 Legacy errors.
  */
-function toFmpSymbol(symbol: string): string {
-  return symbol.replace("/", "");
-}
-
 function buildUrl(symbol: string, timeframe: "1D" | "4H"): string {
-  const fmpSymbol = toFmpSymbol(symbol);
-  if (timeframe === "1D") {
-    return `${FMP_BASE}/historical-price-eod/full?symbol=${fmpSymbol}&apikey=${FMP_API_KEY}`;
-  }
-  return `${FMP_BASE}/historical-chart/4hour?symbol=${fmpSymbol}&apikey=${FMP_API_KEY}`;
+  const cleanSymbol = sanitizeSymbol(symbol);
+  const tfParam = timeframe === "1D" ? "1day" : "4hour";
+  return `${FMP_BASE}/historical-chart/${tfParam}/${cleanSymbol}?apikey=${FMP_API_KEY}`;
 }
 
 // ============================================================
-// Response normalization — maps FMP shape into our Candle[]
+// Response normalization — unified for historical-chart endpoint
 // ============================================================
-function normalizeDailyResponse(raw: FmpDailyResponse): Candle[] {
-  if (!raw.historical || !Array.isArray(raw.historical)) {
-    return [];
-  }
-
-  return raw.historical
-    .map((c) => ({
-      timestamp: new Date(c.date).getTime(),
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-      volume: c.volume,
-    }))
-    .sort((a, b) => a.timestamp - b.timestamp); // oldest first
-}
-
-function normalizeIntradayResponse(raw: FmpIntradayCandle[]): Candle[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
+function normalizeResponse(raw: unknown[]): Candle[] {
+  if (!Array.isArray(raw)) return [];
 
   return raw
-    .map((c) => ({
+    .map((c: any) => ({
       timestamp: new Date(c.date).getTime(),
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-      volume: c.volume,
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+      volume: Number(c.volume),
     }))
     .sort((a, b) => a.timestamp - b.timestamp); // oldest first
 }
@@ -159,20 +117,23 @@ export async function fetchCandles(
   if (!res.ok) {
     const body = await res.text();
     throw new Error(
-      `[FMP] Failed to fetch ${timeframe} candles for ${symbol}: ${res.status} — ${body}`,
+      `[FMP] API Error for ${symbol}: ${res.status} — ${body}`,
     );
   }
 
   const json = await res.json();
 
-  // ---- Normalize based on endpoint shape ----
-  const candles =
-    timeframe === "1D"
-      ? normalizeDailyResponse(json as FmpDailyResponse)
-      : normalizeIntradayResponse(json as FmpIntradayCandle[]);
+  // New FMP keys sometimes receive an error object instead of an array
+  if (json && !Array.isArray(json) && (json as any)["Error Message"]) {
+    throw new Error(`[FMP] ${(json as any)["Error Message"]}`);
+  }
+
+  const candles = normalizeResponse(json as unknown[]);
 
   if (candles.length === 0) {
-    console.warn(`[FMP] No candle data returned for ${symbol} ${timeframe}`);
+    console.warn(
+      `[FMP] No data for ${symbol} ${timeframe}. Check if symbol is supported on your plan.`,
+    );
   }
 
   // ---- Store in cache ----
