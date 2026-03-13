@@ -225,6 +225,28 @@ export function detectHarmonics(
         continue; // D zone already reached
       }
 
+      // ---- Calculate TP and SL (Anti-NULL Rule: CLAUDE.md Rule #2) ----
+      const cdRange = Math.abs(C.price - projectedD);
+      const xaRange = Math.abs(A.price - X.price);
+      let tp1Price: number;
+      let tp2Price: number;
+      let stopLossPrice: number;
+
+      if (direction === "long") {
+        tp1Price = projectedD + cdRange * 0.382;
+        tp2Price = projectedD + cdRange * 0.618;
+        stopLossPrice = projectedD - xaRange * 0.13;
+      } else {
+        tp1Price = projectedD - cdRange * 0.382;
+        tp2Price = projectedD - cdRange * 0.618;
+        stopLossPrice = projectedD + xaRange * 0.13;
+      }
+
+      // Validate all exits are positive — skip if math produces bad values
+      if (tp1Price <= 0 || tp2Price <= 0 || stopLossPrice <= 0) {
+        continue;
+      }
+
       signals.push({
         symbol,
         timeframe,
@@ -236,6 +258,9 @@ export function detectHarmonics(
         bPrice: B.price,
         cPrice: C.price,
         projectedD,
+        tp1Price,
+        tp2Price,
+        stopLossPrice,
       });
     }
   }

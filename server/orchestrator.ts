@@ -9,12 +9,25 @@
  */
 
 import { sendSystemBoot, sendError } from "./utils/notifier";
+import { fetchWatchlist } from "./fmp";
+import { detectHarmonics } from "./patterns";
+import { processPhaseCSignals } from "./screener";
+import type { PhaseCSignal } from "./screener";
+import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
+import { db } from "./db";
+import { liveSignals, insertLiveSignalSchema } from "../shared/schema";
 
 // ============================================================
 // Scan interval and heartbeat configuration
 // ============================================================
 const SCAN_INTERVAL_MS = 30_000; // 30 seconds between scans
 const HEARTBEAT_EVERY_N_SCANS = 10; // Log heartbeat every 10th cycle (~5 min)
+
+// ============================================================
+// Watchlist — initial live test symbols
+// ============================================================
+const WATCHLIST = ["BTC/USD", "ETH/USD", "AAPL", "TSLA"];
+const TIMEFRAMES = ["1D", "4H"] as const;
 
 // ============================================================
 // State lock — prevents overlapping scans (CLAUDE.md Rule #2)
@@ -51,27 +64,109 @@ async function runScanCycle(): Promise<void> {
     }
 
     // ============================================================
-    // PIPELINE STUBS — wire these as each module comes online
+    // Step 1: Fetch candle data from FMP for both timeframes
     // ============================================================
+    const allCandleData = new Map<
+      string,
+      { candles: Awaited<ReturnType<typeof fetchWatchlist>> extends Map<string, infer V> ? V : never; timeframe: "1D" | "4H" }[]
+    >();
 
-    // Step 1: Fetch candle data from FMP
-    // TODO: const candles = await fetchFmpData(watchlist, ["1D", "4H"]);
+    for (const tf of TIMEFRAMES) {
+      const watchlistData = await fetchWatchlist(WATCHLIST, tf);
+      for (const [symbol, candles] of watchlistData) {
+        if (!allCandleData.has(symbol)) allCandleData.set(symbol, []);
+        allCandleData.get(symbol)!.push({ candles, timeframe: tf });
+      }
+    }
 
-    // Step 2: Run harmonic pattern detection on candle data
-    // TODO: const candidates = detectHarmonics(candles);
+    // ============================================================
+    // Step 2: Run harmonic detection on all fetched data
+    // ============================================================
+    const candidates: PhaseCSignal[] = [];
 
-    // Step 3: Filter through Phase C screener (kills Crab/Deep Crab, fires Discord alerts)
-    // TODO: const validSignals = await processPhaseCSignals(candidates);
+    for (const [symbol, datasets] of allCandleData) {
+      for (const { candles, timeframe } of datasets) {
+        if (candles.length < 20) continue; // Not enough data for pivots
+        const detected = detectHarmonics(candles, symbol, timeframe);
+        candidates.push(...detected);
+      }
+    }
 
-    // Step 4: For each valid signal, save to DB and place Alpaca limit order
-    // TODO: for (const signal of validSignals) {
-    //   const parsed = insertLiveSignalSchema.parse({ ... });
-    //   await db.insert(liveSignals).values(parsed);
-    //   await placePhaseCLimitOrder(signal, equity, isCrypto);
-    // }
+    console.log(
+      `[Orchestrator] Scan #${scanCount}: ${candidates.length} candidates found`,
+    );
+
+    if (candidates.length === 0) {
+      const elapsed = Date.now() - cycleStart;
+      console.log(
+        `[Orchestrator] Scan #${scanCount} complete (${elapsed}ms) — no signals`,
+      );
+      return;
+    }
+
+    // ============================================================
+    // Step 3: Filter through Phase C screener (kills Crab/Deep Crab)
+    // ============================================================
+    const validSignals = await processPhaseCSignals(candidates);
+
+    if (validSignals.length === 0) {
+      const elapsed = Date.now() - cycleStart;
+      console.log(
+        `[Orchestrator] Scan #${scanCount} complete (${elapsed}ms) — no valid signals`,
+      );
+      return;
+    }
+
+    // ============================================================
+    // Step 4: Fetch equity, save to DB, execute orders
+    // ============================================================
+    const equity = await getAccountEquity();
+    console.log(`[Orchestrator] Account equity: $${equity.toFixed(2)}`);
+
+    for (const signal of validSignals) {
+      const isCrypto = signal.symbol.includes("/");
+
+      try {
+        // ---- Zod validation (Anti-NULL Rule: CLAUDE.md Rule #2) ----
+        const parsed = insertLiveSignalSchema.parse({
+          symbol: signal.symbol,
+          patternType: signal.pattern,
+          timeframe: signal.timeframe,
+          direction: signal.direction,
+          entryPrice: String(signal.limitPrice),
+          stopLossPrice: String(signal.stopLossPrice),
+          tp1Price: String(signal.tp1Price),
+          tp2Price: String(signal.tp2Price),
+        });
+
+        // ---- Insert into Neon DB ----
+        await db.insert(liveSignals).values(parsed);
+        console.log(
+          `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern}`,
+        );
+
+        // ---- Place limit order on Alpaca ----
+        await placePhaseCLimitOrder(signal, equity, isCrypto);
+      } catch (err) {
+        console.error(
+          `[Orchestrator] Failed to execute signal ${signal.symbol}:`,
+          err,
+        );
+        // Fire Discord alert — per-signal failure doesn't kill the loop
+        sendError(
+          `Signal execution failed: ${signal.symbol} ${signal.pattern}`,
+          err,
+        ).catch(() => {
+          console.error("[Orchestrator] Failed to send error notification");
+        });
+      }
+    }
 
     const elapsed = Date.now() - cycleStart;
-    console.log(`[Orchestrator] Scan #${scanCount} complete (${elapsed}ms)`);
+    console.log(
+      `[Orchestrator] Scan #${scanCount} complete (${elapsed}ms) — ` +
+        `${validSignals.length} signals executed`,
+    );
   } catch (err) {
     console.error("[Orchestrator] Scan cycle failed:", err);
     // Fire Discord alert — but don't let a notification failure crash the loop

@@ -36,6 +36,9 @@ export interface PhaseCSignal {
   bPrice: number;
   cPrice: number;
   projectedD: number;
+  tp1Price: number;
+  tp2Price: number;
+  stopLossPrice: number;
 }
 
 // ============================================================
