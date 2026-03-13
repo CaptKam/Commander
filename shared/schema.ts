@@ -32,6 +32,13 @@ export const liveSignals = pgTable("live_signals", {
   bPrice: numeric("b_price", { precision: 20, scale: 10 }),
   cPrice: numeric("c_price", { precision: 20, scale: 10 }),
   status: text("status").notNull().default("pending"),
+  // Exit management columns — order IDs from Alpaca
+  entryOrderId: text("entry_order_id"),
+  tp1OrderId: text("tp1_order_id"),
+  tp2OrderId: text("tp2_order_id"),
+  slOrderId: text("sl_order_id"),
+  filledQty: numeric("filled_qty", { precision: 20, scale: 10 }),
+  filledAvgPrice: numeric("filled_avg_price", { precision: 20, scale: 10 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   executedAt: timestamp("executed_at"),
 });

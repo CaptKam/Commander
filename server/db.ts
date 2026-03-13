@@ -61,6 +61,18 @@ export async function ensureTablesExist(): Promise<void> {
         `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS ${col} NUMERIC(20,10)`
       ));
     }
+
+    // Add exit management columns (safe to run repeatedly)
+    for (const col of ["entry_order_id", "tp1_order_id", "tp2_order_id", "sl_order_id"]) {
+      await db.execute(sql.raw(
+        `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS ${col} TEXT`
+      ));
+    }
+    for (const col of ["filled_qty", "filled_avg_price"]) {
+      await db.execute(sql.raw(
+        `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS ${col} NUMERIC(20,10)`
+      ));
+    }
     console.log("[DB] Table live_signals: OK");
 
     await db.execute(sql`
