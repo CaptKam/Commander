@@ -1,0 +1,71 @@
+{
+  "family": "gogotrade",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "gogotrade",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/gogotrade:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "DATABASE_URL",
+          "value": "REPLACE_WITH_YOUR_NEON_CONNECTION_STRING"
+        },
+        {
+          "name": "FMP_API_KEY",
+          "value": "REPLACE_WITH_YOUR_FMP_API_KEY"
+        },
+        {
+          "name": "ALPACA_API_KEY",
+          "value": "REPLACE_WITH_YOUR_ALPACA_KEY"
+        },
+        {
+          "name": "ALPACA_API_SECRET",
+          "value": "REPLACE_WITH_YOUR_ALPACA_SECRET"
+        },
+        {
+          "name": "ALPACA_BASE_URL",
+          "value": "https://paper-api.alpaca.markets"
+        },
+        {
+          "name": "TELEGRAM_BOT_TOKEN",
+          "value": "REPLACE_WITH_YOUR_BOT_TOKEN"
+        },
+        {
+          "name": "TELEGRAM_CHAT_ID",
+          "value": "REPLACE_WITH_YOUR_CHAT_ID"
+        },
+        {
+          "name": "PORT",
+          "value": "3000"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/gogotrade",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
