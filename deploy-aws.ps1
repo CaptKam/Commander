@@ -61,14 +61,19 @@ Write-Host "  Docker image pushed successfully!" -ForegroundColor Green
 Write-Host "  ${ECR_URI}:${IMAGE_TAG}" -ForegroundColor Green
 Write-Host "=========================================" -ForegroundColor Green
 
-# ---- Create ECS Cluster ----
+# ---- Create ECS Cluster (skip if exists) ----
 Write-Host ""
 Write-Host "[ECS] Creating Fargate cluster '$ECS_CLUSTER_NAME'..." -ForegroundColor Cyan
-aws ecs create-cluster `
-    --cluster-name $ECS_CLUSTER_NAME `
-    --region $AWS_REGION `
-    --capacity-providers FARGATE `
-    --default-capacity-provider-strategy capacityProvider=FARGATE,weight=1
+$clusterExists = aws ecs describe-clusters --clusters $ECS_CLUSTER_NAME --region $AWS_REGION --query "clusters[?status=='ACTIVE'].clusterName" --output text 2>$null
+if ($clusterExists -eq $ECS_CLUSTER_NAME) {
+    Write-Host "       Cluster '$ECS_CLUSTER_NAME' already exists, skipping." -ForegroundColor Yellow
+} else {
+    aws ecs create-cluster `
+        --cluster-name $ECS_CLUSTER_NAME `
+        --region $AWS_REGION `
+        --capacity-providers FARGATE `
+        --default-capacity-provider-strategy capacityProvider=FARGATE,weight=1
+}
 
 # ---- Register Task Definition ----
 Write-Host "[ECS] Registering task definition..." -ForegroundColor Cyan
@@ -77,7 +82,7 @@ Write-Host "[ECS] Registering task definition..." -ForegroundColor Cyan
 $taskDefContent = Get-Content -Path "gogotrade-task.json" -Raw
 $taskDefContent = $taskDefContent -replace "ACCOUNT_ID", $ACCOUNT_ID
 $tempTaskDef = "gogotrade-task-resolved.json"
-$taskDefContent | Out-File -FilePath $tempTaskDef -Encoding utf8
+[System.IO.File]::WriteAllText($tempTaskDef, $taskDefContent, (New-Object System.Text.UTF8Encoding $false))
 
 aws ecs register-task-definition `
     --cli-input-json "file://$tempTaskDef" `
