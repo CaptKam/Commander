@@ -24,7 +24,10 @@ server/         Express backend + trading engine
   patterns.ts   Harmonic pattern detection (XABCD)
   screener.ts   Phase C signal filtering
   alpaca.ts     Alpaca order execution
-  fmp.ts        FMP market data fetching
+  alpaca-data.ts  Alpaca market data (candle bars) + rate limiter
+  exit-manager.ts  Automated TP/SL order lifecycle
+  crypto-monitor.ts  Price-based crypto position monitor
+  quality-filters.ts  7-rule signal quality validation
 shared/
   schema.ts     Drizzle schema + Zod validation
 ```

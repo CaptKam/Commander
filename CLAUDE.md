@@ -7,7 +7,7 @@ Pattern Bot is an automated harmonic pattern detection and execution system. It 
 - **Backend:** Node.js, Express, TypeScript
 - **Database:** PostgreSQL (via Neon/Supabase), Drizzle ORM
 - **Frontend:** React, Vite, Tailwind CSS, shadcn/ui
-- **Integrations:** Alpaca API (Trading), FMP API (Candle Data)
+- **Integrations:** Alpaca API (Trading + Market Data)
 
 ## CRITICAL SYSTEM RULES (NEVER VIOLATE)
 
@@ -28,7 +28,8 @@ Alpaca will instantly reject orders with a 422 Unprocessable Entity if decimal l
 ### 4. Development Workflow
 - **No Hallucinations:** Do not guess file paths or assume external package exports. If you are unsure, use your grep or ls tools to verify the codebase structure before writing code.
 - **Database Migrations:** ONLY use Drizzle ORM for database queries. If you change a schema, explicitly remind the user to run the Drizzle migration command.
-- **Decoupled Architecture:** Treat the FMP Data Scanner, the Harmonic Compute Engine, and the Alpaca Execution Engine as decoupled components. API latency in one must not crash the others.
+- **Decoupled Architecture:** Treat the Alpaca Data Scanner, the Harmonic Compute Engine, and the Alpaca Execution Engine as decoupled components. API latency in one must not crash the others.
+- **Alpaca Free Tier:** We are on the free tier (200 req/min). The rate limiter in `alpaca-data.ts` enforces this. Do NOT add unbounded API loops or remove the cache TTLs.
 
 ## Current Focus
 We are migrating off a fragile prototype environment into a robust production environment. Focus on stability, strict TypeScript typing, and eliminating silent failures.

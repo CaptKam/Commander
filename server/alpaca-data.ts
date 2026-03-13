@@ -1,26 +1,28 @@
 /**
- * Market Data Ingestion & Caching Layer — Alpaca
+ * Market Data Ingestion & Caching Layer — Alpaca (sole data provider)
  *
- * Replaces FMP as the primary market data source.
  * Alpaca provides both stock and crypto bars through a single API:
  *   - Stocks: GET https://data.alpaca.markets/v2/stocks/bars?symbols=...
  *   - Crypto: GET https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols=...
  *
- * Advantages over FMP free tier:
- *   - Full 1D data coverage for all symbols
- *   - No missing symbols (SOL/USD, LINK/USD all available)
- *   - Already authenticated (same keys used for trading)
+ * Free tier rate limits (monitored and enforced here):
+ *   - 200 requests/minute
+ *   - Burst: ~10 requests/second
  *
- * Cache TTLs:
- *   - "1D" candles: 1 hour
- *   - "4H" candles: 1 minute
+ * Cache TTLs are generous to stay well under the limit:
+ *   - "1D" candles: 2 hours (daily bars don't change intraday)
+ *   - "4H" candles: 5 minutes (balances freshness vs API budget)
+ *
+ * At 30s scan intervals with 4 symbols × 2 timeframes, we make
+ * at most ~4 uncached API calls per cycle (stocks batched, crypto batched).
+ * With caching, most cycles make 0 calls. Well within 200/min.
  *
  * NOTE: This in-memory cache is strictly for API rate-limiting. It does
  * NOT store trade state, so it complies with CLAUDE.md Rule #2.
  */
 
 // ============================================================
-// Types (same interface as fmp.ts for drop-in compatibility)
+// Types
 // ============================================================
 export interface Candle {
   timestamp: number; // Unix ms
@@ -51,11 +53,11 @@ function getAlpacaKeys(): { key: string; secret: string } {
 const ALPACA_DATA_BASE = "https://data.alpaca.markets";
 
 // ============================================================
-// Cache configuration
+// Cache configuration — generous TTLs to conserve free tier budget
 // ============================================================
 const CACHE_TTL_MS: Record<string, number> = {
-  "1D": 60 * 60 * 1000, // 1 hour
-  "4H": 60 * 1000, // 1 minute
+  "1D": 2 * 60 * 60 * 1000, // 2 hours (daily bars are static intraday)
+  "4H": 5 * 60 * 1000,      // 5 minutes (balances freshness vs API cost)
 };
 
 interface CacheEntry {
@@ -67,6 +69,60 @@ const cache = new Map<string, CacheEntry>();
 
 function getCacheKey(symbol: string, timeframe: string): string {
   return `${symbol}:${timeframe}`;
+}
+
+// ============================================================
+// Rate Limiter — Alpaca Free Tier: 200 req/min
+//
+// Sliding window counter. Logs warnings at 80% utilization.
+// Throws at 100% to prevent 429s from Alpaca.
+// ============================================================
+const RATE_LIMIT_WINDOW_MS = 60_000;  // 1 minute
+const RATE_LIMIT_MAX = 200;           // Alpaca free tier
+const RATE_LIMIT_WARN_PCT = 0.8;      // Warn at 80% (160 calls)
+
+const requestTimestamps: number[] = [];
+
+function checkRateLimit(): void {
+  const now = Date.now();
+  // Evict timestamps older than the window
+  while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+
+  if (requestTimestamps.length >= RATE_LIMIT_MAX) {
+    const oldestAge = now - requestTimestamps[0];
+    const retryAfterMs = RATE_LIMIT_WINDOW_MS - oldestAge;
+    throw new Error(
+      `[MarketData] Rate limit reached (${RATE_LIMIT_MAX}/min). ` +
+      `Retry after ${Math.ceil(retryAfterMs / 1000)}s. ` +
+      `Upgrade to paid tier for 1000/min.`,
+    );
+  }
+
+  if (requestTimestamps.length >= RATE_LIMIT_MAX * RATE_LIMIT_WARN_PCT) {
+    console.warn(
+      `[MarketData] Rate limit warning: ${requestTimestamps.length}/${RATE_LIMIT_MAX} calls in last 60s ` +
+      `(${Math.round((requestTimestamps.length / RATE_LIMIT_MAX) * 100)}% utilized)`,
+    );
+  }
+
+  requestTimestamps.push(now);
+}
+
+/**
+ * Returns current API usage stats for monitoring.
+ */
+export function getRateLimitStats(): { used: number; limit: number; pct: number } {
+  const now = Date.now();
+  while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+  return {
+    used: requestTimestamps.length,
+    limit: RATE_LIMIT_MAX,
+    pct: Math.round((requestTimestamps.length / RATE_LIMIT_MAX) * 100),
+  };
 }
 
 // ============================================================
@@ -136,6 +192,8 @@ async function fetchStockBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
+  checkRateLimit(); // Free tier: 200/min guard
+
   const { start, end } = getDateRange(timeframe);
   const alpacaTf = toAlpacaTimeframe(timeframe);
 
@@ -195,6 +253,8 @@ async function fetchCryptoBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
+  checkRateLimit(); // Free tier: 200/min guard
+
   const { start, end } = getDateRange(timeframe);
   const alpacaTf = toAlpacaTimeframe(timeframe);
 
@@ -242,7 +302,7 @@ async function fetchCryptoBars(
 }
 
 // ============================================================
-// Public API (same signature as fmp.ts for drop-in swap)
+// Public API
 // ============================================================
 
 /**
