@@ -226,19 +226,26 @@ export function detectHarmonics(
       }
 
       // ---- Calculate TP and SL (Anti-NULL Rule: CLAUDE.md Rule #2) ----
-      const cdRange = Math.abs(C.price - projectedD);
+      // TP uses Fibonacci retracement of the AD leg from D.
+      // This gives meaningful targets regardless of how tight C→D is.
+      //   TP1 = 0.382 retracement of AD from D
+      //   TP2 = 0.618 retracement of AD from D
+      // SL = 13% of XA extended beyond D (against the trade direction).
+      const adRange = Math.abs(A.price - projectedD);
       const xaRange = Math.abs(A.price - X.price);
       let tp1Price: number;
       let tp2Price: number;
       let stopLossPrice: number;
 
       if (direction === "long") {
-        tp1Price = projectedD + cdRange * 0.382;
-        tp2Price = projectedD + cdRange * 0.618;
+        // Long: D is a low, we expect price to rise toward A
+        tp1Price = projectedD + adRange * 0.382;
+        tp2Price = projectedD + adRange * 0.618;
         stopLossPrice = projectedD - xaRange * 0.13;
       } else {
-        tp1Price = projectedD - cdRange * 0.382;
-        tp2Price = projectedD - cdRange * 0.618;
+        // Short: D is a high, we expect price to fall toward A
+        tp1Price = projectedD - adRange * 0.382;
+        tp2Price = projectedD - adRange * 0.618;
         stopLossPrice = projectedD + xaRange * 0.13;
       }
 
