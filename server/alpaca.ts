@@ -34,7 +34,7 @@ interface AlpacaOrderPayload {
   qty: string;
   side: "buy" | "sell";
   type: "limit";
-  time_in_force: "gtc";
+  time_in_force: "gtc" | "day";
   limit_price: string;
 }
 
@@ -116,23 +116,27 @@ export async function placePhaseCLimitOrder(
   // ---- Step 4: Build and send order ----
   const side: "buy" | "sell" = signal.direction === "long" ? "buy" : "sell";
 
+  // Crypto always uses GTC. Stocks use GTC for buys, DAY for sells
+  // (short sells on hard-to-borrow stocks reject GTC with 422).
+  const tif: "gtc" | "day" = isCrypto ? "gtc" : (side === "sell" ? "day" : "gtc");
+
   const payload: AlpacaOrderPayload = {
     symbol: signal.symbol,
     qty: String(safeQty),
     side,
     type: "limit",
-    time_in_force: "gtc",
+    time_in_force: tif,
     limit_price: String(safePrice),
   };
 
   console.log(
     `[Alpaca] Placing ${side} limit order: ${signal.symbol} ` +
-      `qty=${safeQty} price=${safePrice} ` +
+      `qty=${safeQty} price=${safePrice} tif=${tif} ` +
       `(${(allocation * 100).toFixed(0)}% of $${accountEquity.toFixed(2)})`,
   );
 
   try {
-    const res = await fetch(`${ALPACA_BASE_URL}/v2/orders`, {
+    let res = await fetch(`${ALPACA_BASE_URL}/v2/orders`, {
       method: "POST",
       headers: {
         "APCA-API-KEY-ID": ALPACA_API_KEY!,
@@ -141,6 +145,27 @@ export async function placePhaseCLimitOrder(
       },
       body: JSON.stringify(payload),
     });
+
+    // ---- Hard-to-borrow retry: if GTC rejected, fall back to DAY ----
+    if (!res.ok && res.status === 422 && payload.time_in_force === "gtc") {
+      const body = await res.text();
+      const lowerBody = body.toLowerCase();
+      if (lowerBody.includes("hard-to-borrow") || lowerBody.includes("day order")) {
+        console.warn(
+          `[Alpaca] GTC rejected for ${signal.symbol} (hard-to-borrow) — retrying with DAY`,
+        );
+        payload.time_in_force = "day";
+        res = await fetch(`${ALPACA_BASE_URL}/v2/orders`, {
+          method: "POST",
+          headers: {
+            "APCA-API-KEY-ID": ALPACA_API_KEY!,
+            "APCA-API-SECRET-KEY": ALPACA_API_SECRET!,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+      }
+    }
 
     if (!res.ok) {
       const body = await res.text();
@@ -157,7 +182,7 @@ export async function placePhaseCLimitOrder(
 
     const order = (await res.json()) as AlpacaOrderResponse;
     console.log(
-      `[Alpaca] Order accepted: ${order.id} status=${order.status}`,
+      `[Alpaca] Order accepted: ${order.id} status=${order.status} tif=${payload.time_in_force}`,
     );
     return order;
   } catch (err) {
