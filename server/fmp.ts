@@ -77,15 +77,25 @@ interface FmpIntradayCandle {
 }
 
 // ============================================================
-// FMP API endpoints
+// FMP API endpoints — using /stable/ base (v3 is legacy/deprecated)
+// See: https://site.financialmodelingprep.com/developer/docs
 // ============================================================
-const FMP_BASE = "https://financialmodelingprep.com/api/v3";
+const FMP_BASE = "https://financialmodelingprep.com/stable";
+
+/**
+ * Converts our symbol format to FMP's format.
+ * FMP uses "BTCUSD" not "BTC/USD" for crypto pairs.
+ */
+function toFmpSymbol(symbol: string): string {
+  return symbol.replace("/", "");
+}
 
 function buildUrl(symbol: string, timeframe: "1D" | "4H"): string {
+  const fmpSymbol = toFmpSymbol(symbol);
   if (timeframe === "1D") {
-    return `${FMP_BASE}/historical-price-full/${encodeURIComponent(symbol)}?apikey=${FMP_API_KEY}`;
+    return `${FMP_BASE}/historical-price-eod/full?symbol=${fmpSymbol}&apikey=${FMP_API_KEY}`;
   }
-  return `${FMP_BASE}/historical-chart/4hour/${encodeURIComponent(symbol)}?apikey=${FMP_API_KEY}`;
+  return `${FMP_BASE}/historical-chart/4hour?symbol=${fmpSymbol}&apikey=${FMP_API_KEY}`;
 }
 
 // ============================================================
