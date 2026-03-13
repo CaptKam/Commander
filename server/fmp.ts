@@ -20,13 +20,21 @@
 // ============================================================
 // Environment
 // ============================================================
-const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
-const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+// Read at module level but validated at call time — a missing key must NOT
+// crash the process at import, otherwise the bot enters a restart loop and
+// the in-memory dedup map resets every cycle, causing Telegram spam.
+let ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+let ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
 
-if (!ALPACA_API_KEY || !ALPACA_API_SECRET) {
-  throw new Error(
-    "[MarketData] ALPACA_API_KEY and ALPACA_API_SECRET must be set in .env",
-  );
+function assertMarketDataKeys(): void {
+  // Re-read in case env was set after module load (e.g. dotenv late init)
+  ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+  ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+  if (!ALPACA_API_KEY || !ALPACA_API_SECRET) {
+    throw new Error(
+      "[MarketData] ALPACA_API_KEY and ALPACA_API_SECRET must be set in .env",
+    );
+  }
 }
 
 // ============================================================
@@ -174,6 +182,7 @@ export async function fetchCandles(
   }
 
   // ---- Cache miss or expired — hit Alpaca ----
+  assertMarketDataKeys();
   const { url, headers } = buildRequest(symbol, timeframe);
   const allCandles: Candle[] = [];
   let nextUrl: string | null = url;
