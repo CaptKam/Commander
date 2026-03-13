@@ -313,3 +313,141 @@ export function detectHarmonics(
 
   return signals;
 }
+
+// ============================================================
+// Completed Pattern Detection — All 5 pivots (X,A,B,C,D) confirmed
+// ============================================================
+
+/**
+ * Detects COMPLETED XABCD harmonic patterns from candle data.
+ *
+ * "Completed" = all 5 pivots (X, A, B, C, D) are confirmed swing points.
+ * D is a real pivot, not a projection. Entry uses D's actual price.
+ * These are immediate-execution signals (market order if within slippage).
+ *
+ * @param candles    Chronologically sorted candles (oldest first)
+ * @param symbol     Ticker symbol (e.g., "AAPL", "BTC/USD")
+ * @param timeframe  "1D" or "4H"
+ * @returns Array of completed pattern signals with confirmed D prices
+ */
+export function detectCompletedPatterns(
+  candles: Candle[],
+  symbol: string,
+  timeframe: "1D" | "4H",
+): PhaseCSignal[] {
+  const signals: PhaseCSignal[] = [];
+  const pivots = findPivots(candles);
+
+  // Need at least 5 pivots for a completed XABCD
+  if (pivots.length < 5) {
+    return signals;
+  }
+
+  // Only look at recent pivots (last 20)
+  const recentPivots = pivots.slice(-20);
+
+  for (let xi = 0; xi < recentPivots.length - 4; xi++) {
+    const X = recentPivots[xi];
+    const A = recentPivots[xi + 1];
+    const B = recentPivots[xi + 2];
+    const C = recentPivots[xi + 3];
+    const D = recentPivots[xi + 4];
+
+    // ---- Structural validation: must alternate high/low ----
+    if (X.type === A.type || A.type === B.type || B.type === C.type || C.type === D.type) {
+      continue;
+    }
+
+    // ---- Minimum leg filter: reject micro-noise pivots ----
+    const xaSize = Math.abs(X.price - A.price);
+    const midPrice = (X.price + A.price) / 2;
+    if (xaSize / midPrice < MIN_XA_LEG_PCT) {
+      continue;
+    }
+
+    // ---- Calculate leg ratios ----
+    const xabRatio = calcRetrace(X.price, A.price, B.price);
+    const abcRatio = calcRetrace(A.price, B.price, C.price);
+    const xadRatio = calcRetrace(X.price, A.price, D.price);
+
+    // ---- Test each pattern definition ----
+    for (const pattern of PATTERN_DEFS) {
+      if (
+        !ratioInRange(xabRatio, pattern.xab.min, pattern.xab.max, RATIO_TOLERANCE) ||
+        !ratioInRange(abcRatio, pattern.abc.min, pattern.abc.max, RATIO_TOLERANCE) ||
+        !ratioInRange(xadRatio, pattern.xad.min, pattern.xad.max, RATIO_TOLERANCE)
+      ) {
+        continue;
+      }
+
+      // ---- Determine direction ----
+      const direction: Direction = A.type === 1 ? "long" : "short";
+
+      // ---- Validate D price ----
+      if (!Number.isFinite(D.price) || D.price <= 0) {
+        continue;
+      }
+
+      // ---- Minimum AD range: reject compressed targets ----
+      const adRangePct = Math.abs(A.price - D.price) / A.price;
+      if (adRangePct < MIN_AD_RANGE_PCT) {
+        continue;
+      }
+
+      // ---- Calculate TP and SL (same logic as forming patterns) ----
+      const adRange = Math.abs(A.price - D.price);
+      const xaRange = Math.abs(A.price - X.price);
+      let tp1Price: number;
+      let tp2Price: number;
+      let stopLossPrice: number;
+
+      if (direction === "long") {
+        tp1Price = D.price + adRange * 0.382;
+        tp2Price = D.price + adRange * 0.618;
+        stopLossPrice = D.price - xaRange * 0.13;
+      } else {
+        tp1Price = D.price - adRange * 0.382;
+        tp2Price = D.price - adRange * 0.618;
+        stopLossPrice = D.price + xaRange * 0.13;
+      }
+
+      if (tp1Price <= 0 || tp2Price <= 0 || stopLossPrice <= 0) {
+        continue;
+      }
+
+      // ---- Slippage check: is current price still near D? ----
+      // Only signal if the last close is within 1.5% of D's price
+      const lastClose = candles[candles.length - 1].close;
+      const slippagePct = Math.abs(lastClose - D.price) / D.price;
+      if (slippagePct > 0.015) {
+        continue; // Price has moved too far from D — missed entry
+      }
+
+      console.log(
+        `[Harmonics] COMPLETED ${symbol} ${timeframe} ${pattern.name} ${direction.toUpperCase()} — ` +
+          `X=$${X.price.toFixed(2)} A=$${A.price.toFixed(2)} B=$${B.price.toFixed(2)} ` +
+          `C=$${C.price.toFixed(2)} D=$${D.price.toFixed(2)} | ` +
+          `XAB=${xabRatio.toFixed(3)} ABC=${abcRatio.toFixed(3)} XAD=${xadRatio.toFixed(3)} | ` +
+          `SL=$${stopLossPrice.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)}`,
+      );
+
+      signals.push({
+        symbol,
+        timeframe,
+        pattern: pattern.name,
+        direction,
+        limitPrice: D.price, // Use actual D price as entry
+        xPrice: X.price,
+        aPrice: A.price,
+        bPrice: B.price,
+        cPrice: C.price,
+        projectedD: D.price, // D is confirmed, not projected
+        tp1Price,
+        tp2Price,
+        stopLossPrice,
+      });
+    }
+  }
+
+  return signals;
+}

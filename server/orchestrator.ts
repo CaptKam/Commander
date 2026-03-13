@@ -10,14 +10,16 @@
 
 import { sendSystemBoot, sendError, sendPhaseCSignal } from "./utils/notifier";
 import { fetchWatchlist } from "./alpaca-data";
-import { detectHarmonics } from "./patterns";
+import { detectHarmonics, detectCompletedPatterns } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
 import { runExitCycle } from "./exit-manager";
+import { runCryptoMonitor } from "./crypto-monitor";
+import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 
 // ============================================================
 // Scan interval and heartbeat configuration
@@ -164,19 +166,26 @@ async function runScanCycle(): Promise<void> {
 
     // ============================================================
     // Step 2: Run harmonic detection on all fetched data
+    // Both forming (Phase C) and completed (all 5 pivots confirmed)
     // ============================================================
     const candidates: PhaseCSignal[] = [];
 
     for (const [symbol, datasets] of allCandleData) {
       for (const { candles, timeframe } of datasets) {
         if (candles.length < 20) continue; // Not enough data for pivots
-        const detected = detectHarmonics(candles, symbol, timeframe);
-        candidates.push(...detected);
+
+        // Mode 1: Completed patterns (D is a real pivot → market order)
+        const completed = detectCompletedPatterns(candles, symbol, timeframe);
+        candidates.push(...completed);
+
+        // Mode 2: Forming patterns (D is projected → limit order)
+        const forming = detectHarmonics(candles, symbol, timeframe);
+        candidates.push(...forming);
       }
     }
 
     console.log(
-      `[Orchestrator] Scan #${scanCount}: ${candidates.length} candidates found`,
+      `[Orchestrator] Scan #${scanCount}: ${candidates.length} raw candidates found`,
     );
 
     if (candidates.length === 0) {
@@ -188,9 +197,15 @@ async function runScanCycle(): Promise<void> {
     }
 
     // ============================================================
+    // Step 2.5: Quality filters — 7-rule validation gate
+    // Applied BEFORE dedup so bad signals never hit the database.
+    // ============================================================
+    const qualityPassed = validateSignalQuality(candidates);
+
+    // ============================================================
     // Step 3: Filter through Phase C screener (kills Crab/Deep Crab)
     // ============================================================
-    const validSignals = await processPhaseCSignals(candidates, settings.enabledPatterns);
+    const validSignals = await processPhaseCSignals(qualityPassed, settings.enabledPatterns);
 
     if (validSignals.length === 0) {
       const elapsed = Date.now() - cycleStart;
@@ -225,10 +240,10 @@ async function runScanCycle(): Promise<void> {
         continue;
       }
 
-      // ---- Layer 2: DB dedup with time window ----
-      // 4H timeframe → look back 4 hours, 1D → look back 24 hours
+      // ---- Layer 2: DB dedup (authoritative, survives restarts) ----
+      // Uses the age window from quality-filters: 1D=14 days, 4H=7 days
       try {
-        const windowMs = signal.timeframe === "4H" ? 4 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+        const windowMs = AGE_WINDOW_MS[signal.timeframe as keyof typeof AGE_WINDOW_MS] ?? (14 * 24 * 60 * 60 * 1000);
         const timeWindow = new Date(Date.now() - windowMs);
 
         const existing = await db
@@ -240,6 +255,7 @@ async function runScanCycle(): Promise<void> {
               eq(liveSignals.timeframe, signal.timeframe),
               eq(liveSignals.patternType, signal.pattern),
               eq(liveSignals.direction, signal.direction),
+              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "cancelled"]),
               gte(liveSignals.createdAt, timeWindow),
             ),
           )
@@ -247,7 +263,7 @@ async function runScanCycle(): Promise<void> {
 
         if (existing.length > 0) {
           console.log(
-            `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (exists in DB within ${signal.timeframe} window)`,
+            `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (exists in DB within age window)`,
           );
           continue;
         }
@@ -345,6 +361,13 @@ async function runScanCycle(): Promise<void> {
       await runExitCycle();
     } catch (err) {
       console.error("[Orchestrator] Exit cycle failed:", err);
+    }
+
+    // ---- Crypto Monitor: price-based exit fallback for crypto positions ----
+    try {
+      await runCryptoMonitor();
+    } catch (err) {
+      console.error("[Orchestrator] Crypto monitor failed:", err);
     }
 
     // ALWAYS release the lock, even if the scan threw
