@@ -466,6 +466,21 @@ router.get("/status", (_req, res) => {
 });
 
 /**
+ * POST /api/signals/clear — Delete all signals from the database.
+ * Used to reset the live scanner feed on manual request.
+ */
+router.post("/signals/clear", async (_req, res) => {
+  try {
+    await db.delete(liveSignals);
+    console.log("[API] Signals cleared");
+    res.json({ ok: true, message: "All signals cleared" });
+  } catch (err) {
+    console.error("[API] Failed to clear signals:", err);
+    res.status(500).json({ error: "Failed to clear signals" });
+  }
+});
+
+/**
  * GET /api/health — Simple health check for Render.
  */
 router.get("/health", (_req, res) => {
