@@ -8,7 +8,7 @@
  * Only Gartley, Bat, Alt Bat, Butterfly, and ABCD are computed.
  */
 
-import type { Candle } from "./fmp";
+import type { Candle } from "./alpaca-data";
 import type { PhaseCSignal, HarmonicPattern, Direction } from "./screener";
 import { calcRetrace, ratioInRange, FIB } from "./harmonics";
 

@@ -7,7 +7,7 @@ import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
-import { getCacheStats } from "./fmp";
+import { getCacheStats } from "./alpaca-data";
 
 const router = Router();
 

@@ -9,7 +9,7 @@
  */
 
 import { sendSystemBoot, sendError, sendPhaseCSignal } from "./utils/notifier";
-import { fetchWatchlist } from "./fmp";
+import { fetchWatchlist } from "./alpaca-data";
 import { detectHarmonics } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
