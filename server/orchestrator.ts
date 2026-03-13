@@ -16,6 +16,7 @@ import type { PhaseCSignal } from "./screener";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist } from "../shared/schema";
+import { desc, and, eq } from "drizzle-orm";
 
 // ============================================================
 // Scan interval and heartbeat configuration
@@ -175,12 +176,37 @@ async function runScanCycle(): Promise<void> {
     }
 
     for (const signal of validSignals) {
-      // ---- Sent Signals Cache: skip if already acted on this candle ----
+      // ---- Layer 1: In-memory cache (fast, survives within process) ----
       if (isSignalAlreadySent(signal)) {
         console.log(
-          `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (already sent)`,
+          `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (in-memory cache)`,
         );
         continue;
+      }
+
+      // ---- Layer 2: DB dedup — check if this exact signal already exists ----
+      try {
+        const existing = await db
+          .select({ id: liveSignals.id })
+          .from(liveSignals)
+          .where(
+            and(
+              eq(liveSignals.symbol, signal.symbol),
+              eq(liveSignals.timeframe, signal.timeframe),
+              eq(liveSignals.patternType, signal.pattern),
+              eq(liveSignals.direction, signal.direction),
+            ),
+          )
+          .limit(1);
+
+        if (existing.length > 0) {
+          console.log(
+            `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (already in DB)`,
+          );
+          continue;
+        }
+      } catch (err) {
+        console.error("[Orchestrator] DB dedup check failed, proceeding with caution:", err);
       }
 
       const isCrypto = signal.symbol.includes("/");
