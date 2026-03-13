@@ -44,6 +44,8 @@ jobs:
           branch_name: preview/pr-${{ github.event.number }}-${{ needs.setup.outputs.branch }}
           api_key: ${{ secrets.NEON_API_KEY }}
           expires_at: ${{ env.EXPIRES_AT }}
+      - name: Set DATABASE_URL
+        run: echo "DATABASE_URL=${{ steps.create_neon_branch.outputs.db_url_with_pooler }}" >> "$GITHUB_ENV"
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Setup Node.js
@@ -55,8 +57,6 @@ jobs:
         run: npm ci
       - name: Push schema to preview branch
         run: npx drizzle-kit push
-        env:
-          DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url_with_pooler }}
   delete_neon_branch:
     name: Delete Neon Branch
     needs: setup
