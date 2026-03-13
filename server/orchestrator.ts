@@ -31,12 +31,36 @@ const TIMEFRAMES = ["1D", "4H"] as const;
 
 // ============================================================
 // State lock — prevents overlapping scans (CLAUDE.md Rule #2)
-// This is the ONLY permitted in-memory state. It is ephemeral
-// by nature (resets on restart) and does not represent trade data.
+// These are ephemeral by nature (reset on restart) and do not
+// represent trade data, so they comply with Rule #2.
 // ============================================================
 let isScanning = false;
 let scanCount = 0;
 let scanIntervalId: ReturnType<typeof setInterval> | null = null;
+
+// ============================================================
+// Sent Signals Cache — prevents re-processing the same forming
+// pattern every scan cycle while the candle is still open.
+// Key: "symbol:timeframe:pattern:direction", Value: expiry timestamp.
+// 4-hour TTL so a signal is only acted on once per candle.
+// ============================================================
+const sentSignals = new Map<string, number>();
+const SIGNAL_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+function isSignalAlreadySent(signal: PhaseCSignal): boolean {
+  const key = `${signal.symbol}:${signal.timeframe}:${signal.pattern}:${signal.direction}`;
+  const now = Date.now();
+  const expiresAt = sentSignals.get(key);
+  if (expiresAt && expiresAt > now) return true;
+  sentSignals.set(key, now + SIGNAL_CACHE_TTL_MS);
+  // Lazy cleanup
+  if (sentSignals.size > 500) {
+    for (const [k, v] of sentSignals) {
+      if (v <= now) sentSignals.delete(k);
+    }
+  }
+  return false;
+}
 
 // ============================================================
 // The Scan Cycle — mutex-guarded, never overlaps
@@ -134,6 +158,14 @@ async function runScanCycle(): Promise<void> {
     }
 
     for (const signal of validSignals) {
+      // ---- Sent Signals Cache: skip if already acted on this candle ----
+      if (isSignalAlreadySent(signal)) {
+        console.log(
+          `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (already sent)`,
+        );
+        continue;
+      }
+
       const isCrypto = signal.symbol.includes("/");
 
       try {
