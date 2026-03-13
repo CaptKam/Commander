@@ -3,7 +3,7 @@
  * Takes validated Phase C signals and places live limit orders.
  *
  * CLAUDE.md Rule #1: All qty/price values pass through Anti-422 formatters.
- * CLAUDE.md Rule #4: Alpaca failures trigger Discord alerts, never silent.
+ * CLAUDE.md Rule #4: Alpaca failures trigger Telegram alerts, never silent.
  */
 
 import { formatAlpacaQty, formatAlpacaPrice } from "./utils/alpacaFormatters";
@@ -142,7 +142,7 @@ export async function placePhaseCLimitOrder(
       const err = new Error(
         `Alpaca order rejected: ${res.status} — ${body}`,
       );
-      // Fire Discord alert so your phone knows immediately
+      // Fire Telegram alert so your phone knows immediately
       await sendError(
         `Alpaca Limit Order Failed: ${signal.symbol} ${signal.pattern} ${side}`,
         err,

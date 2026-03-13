@@ -3,7 +3,7 @@
  * Scans candle data for XABCD harmonic structures approaching point D.
  *
  * CLAUDE.md Rule #3: Crab and Deep Crab are globally DISABLED.
- * CLAUDE.md Rule #4: Discord notification failures must not crash the scan loop.
+ * CLAUDE.md Rule #4: Telegram notification failures must not crash the scan loop.
  */
 
 import { sendPhaseCSignal, sendError } from "./utils/notifier";
@@ -72,7 +72,7 @@ export async function processPhaseCSignals(
 
     validSignals.push(candidate);
 
-    // ---- Fire Discord alert (non-blocking) ----
+    // ---- Fire Telegram alert (non-blocking) ----
     // Uses .catch() instead of await to prevent notification failures
     // from blocking the scan loop (CLAUDE.md Rule #4: Decoupled Architecture)
     sendPhaseCSignal(
@@ -83,7 +83,7 @@ export async function processPhaseCSignals(
       candidate.limitPrice,
     ).catch((err) => {
       sendError(
-        `Discord alert failed for ${candidate.symbol} ${candidate.pattern}`,
+        `Telegram alert failed for ${candidate.symbol} ${candidate.pattern}`,
         err,
       ).catch(() => {
         // Last resort: if even the error notification fails, just log

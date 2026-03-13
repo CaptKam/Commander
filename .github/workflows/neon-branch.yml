@@ -8,6 +8,8 @@ on:
       - closed
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
   setup:
     name: Setup
@@ -52,7 +54,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Push schema to preview branch
-        run: npx drizzle-kit push
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::warning::DATABASE_URL is empty (GitHub masked the Neon output). Skipping schema push."
+            exit 0
+          fi
+          npx drizzle-kit push
         env:
           DATABASE_URL: ${{ steps.create_neon_branch.outputs.db_url_with_pooler }}
   delete_neon_branch:
