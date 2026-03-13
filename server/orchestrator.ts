@@ -15,7 +15,7 @@ import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { db, ensureTablesExist } from "./db";
-import { liveSignals, insertLiveSignalSchema, watchlist } from "../shared/schema";
+import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
 import { and, eq, gte } from "drizzle-orm";
 
 // ============================================================
@@ -39,6 +39,40 @@ async function getActiveWatchlist(): Promise<string[]> {
   } catch (err) {
     console.error("[Orchestrator] Failed to load watchlist from DB, using fallback:", err);
     return FALLBACK_WATCHLIST;
+  }
+}
+
+// ============================================================
+// Settings — loaded from DB at the start of each scan cycle
+// ============================================================
+interface BotSettings {
+  tradingEnabled: boolean;
+  equityAllocation: number;
+  cryptoAllocation: number;
+  enabledPatterns: string[];
+}
+
+const DEFAULT_SETTINGS: BotSettings = {
+  tradingEnabled: true,
+  equityAllocation: 0.05,
+  cryptoAllocation: 0.07,
+  enabledPatterns: ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"],
+};
+
+async function getSettings(): Promise<BotSettings> {
+  try {
+    const rows = await db.select().from(systemSettings).limit(1);
+    if (rows.length === 0) return DEFAULT_SETTINGS;
+    const s = rows[0];
+    return {
+      tradingEnabled: s.tradingEnabled,
+      equityAllocation: Number(s.equityAllocation) || DEFAULT_SETTINGS.equityAllocation,
+      cryptoAllocation: Number(s.cryptoAllocation) || DEFAULT_SETTINGS.cryptoAllocation,
+      enabledPatterns: (s.enabledPatterns as string[]) ?? DEFAULT_SETTINGS.enabledPatterns,
+    };
+  } catch (err) {
+    console.error("[Orchestrator] Failed to load settings, using defaults:", err);
+    return DEFAULT_SETTINGS;
   }
 }
 
@@ -101,6 +135,11 @@ async function runScanCycle(): Promise<void> {
     }
 
     // ============================================================
+    // Step 0: Load settings from DB
+    // ============================================================
+    const settings = await getSettings();
+
+    // ============================================================
     // Step 1: Fetch candle data from Alpaca for both timeframes
     // ============================================================
     const activeSymbols = await getActiveWatchlist();
@@ -149,7 +188,7 @@ async function runScanCycle(): Promise<void> {
     // ============================================================
     // Step 3: Filter through Phase C screener (kills Crab/Deep Crab)
     // ============================================================
-    const validSignals = await processPhaseCSignals(candidates);
+    const validSignals = await processPhaseCSignals(candidates, settings.enabledPatterns);
 
     if (validSignals.length === 0) {
       const elapsed = Date.now() - cycleStart;
@@ -246,9 +285,16 @@ async function runScanCycle(): Promise<void> {
           `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern}`,
         );
 
-        // ---- Place limit order on Alpaca (only if equity was fetched) ----
-        if (equity !== null) {
-          await placePhaseCLimitOrder(signal, equity, isCrypto);
+        // ---- Place limit order on Alpaca (only if equity was fetched AND trading enabled) ----
+        if (!settings.tradingEnabled) {
+          console.log(
+            `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
+          );
+        } else if (equity !== null) {
+          await placePhaseCLimitOrder(signal, equity, isCrypto, {
+            equity: settings.equityAllocation,
+            crypto: settings.cryptoAllocation,
+          });
         } else {
           console.warn(
             `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
