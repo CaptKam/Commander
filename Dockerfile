@@ -11,17 +11,20 @@ ENV TZ=UTC
 # Copy package files first to leverage Docker layer caching
 COPY package*.json ./
 
-# Install production dependencies only
-RUN npm ci --omit=dev
+# Install ALL dependencies (dev needed for vite build)
+RUN npm ci --legacy-peer-deps
 
 # Copy the rest of the application code
 COPY . .
 
-# Install tsx globally to run TypeScript files directly in production
-RUN npm install -g tsx
+# Build the React dashboard
+RUN npm run build
+
+# Remove dev dependencies after build to shrink the image
+RUN npm prune --omit=dev --legacy-peer-deps
 
 # Expose the port for the Dashboard API (Web Service)
 EXPOSE 3000
 
 # Start command
-CMD ["tsx", "server/index.ts"]
+CMD ["node", "--import", "tsx", "server/index.ts"]
