@@ -89,6 +89,7 @@ export default function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -106,6 +107,8 @@ export default function App() {
       if (statRes.status === "fulfilled") setStatus(statRes.value);
     } catch {
       // silent — dashboard will show stale data
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -118,6 +121,17 @@ export default function App() {
   const isOnline = status?.status === "online";
   const plColor =
     (account?.daily_pl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400";
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <Zap className="w-10 h-10 text-amber-400 mx-auto mb-3 animate-pulse" />
+          <p className="text-gray-400 text-sm">Loading Pattern Bot Dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-6">
