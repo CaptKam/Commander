@@ -1,8 +1,9 @@
 /**
- * FMP Data Ingestion & Caching Layer — Phase 7 (FIXED for New API Keys)
+ * FMP Data Ingestion & Caching Layer — Phase 8 (Stable API Migration)
  *
  * FIXES:
- * 1. Switches from 'historical-price-full' (Legacy) to 'historical-chart' (Modern).
+ * 1. Migrates from deprecated /api/v3/ endpoints to /stable/ endpoints.
+ *    FMP deprecated all v3/v4 legacy routes as of August 31, 2025.
  * 2. Sanitizes symbols (removes "/" for Crypto compatibility).
  *
  * Cache TTLs:
@@ -60,28 +61,42 @@ function getCacheKey(symbol: string, timeframe: string): string {
 }
 
 // ============================================================
-// FMP API endpoints — using /api/v3/historical-chart for ALL requests
-// The 'historical-chart' endpoint works for both daily and intraday
-// with newer API keys, avoiding 403 Legacy errors.
+// FMP API endpoints — using /stable/ routes (v3 deprecated Aug 2025)
+// Daily uses historical-price-eod/full, intraday uses historical-chart.
+// Symbol is now a query parameter, not a path segment.
 // ============================================================
-const FMP_BASE = "https://financialmodelingprep.com/api/v3";
+const FMP_BASE = "https://financialmodelingprep.com/stable";
 
 /**
- * Uses the 'historical-chart' endpoint for ALL requests to avoid 403 Legacy errors.
+ * Builds the correct /stable/ URL for FMP requests.
+ * - 1D: /stable/historical-price-eod/full?symbol=AAPL&apikey=...
+ * - 4H: /stable/historical-chart/4hour?symbol=AAPL&apikey=...
  */
 function buildUrl(symbol: string, timeframe: "1D" | "4H"): string {
   const cleanSymbol = sanitizeSymbol(symbol);
-  const tfParam = timeframe === "1D" ? "1day" : "4hour";
-  return `${FMP_BASE}/historical-chart/${tfParam}/${cleanSymbol}?apikey=${FMP_API_KEY}`;
+  if (timeframe === "1D") {
+    return `${FMP_BASE}/historical-price-eod/full?symbol=${cleanSymbol}&apikey=${FMP_API_KEY}`;
+  }
+  return `${FMP_BASE}/historical-chart/4hour?symbol=${cleanSymbol}&apikey=${FMP_API_KEY}`;
 }
 
 // ============================================================
-// Response normalization — unified for historical-chart endpoint
+// Response normalization — handles both stable response formats:
+//   - historical-chart (4H): returns flat array of candle objects
+//   - historical-price-eod/full (1D): returns { historical: [...] }
 // ============================================================
-function normalizeResponse(raw: unknown[]): Candle[] {
-  if (!Array.isArray(raw)) return [];
+function normalizeResponse(raw: unknown): Candle[] {
+  let records: unknown[];
 
-  return raw
+  if (Array.isArray(raw)) {
+    records = raw;
+  } else if (raw && typeof raw === "object" && Array.isArray((raw as any).historical)) {
+    records = (raw as any).historical;
+  } else {
+    return [];
+  }
+
+  return records
     .map((c: any) => ({
       timestamp: new Date(c.date).getTime(),
       open: Number(c.open),
@@ -128,7 +143,7 @@ export async function fetchCandles(
     throw new Error(`[FMP] ${(json as any)["Error Message"]}`);
   }
 
-  const candles = normalizeResponse(json as unknown[]);
+  const candles = normalizeResponse(json);
 
   if (candles.length === 0) {
     console.warn(
