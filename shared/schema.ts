@@ -4,6 +4,7 @@ import {
   text,
   numeric,
   timestamp,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -64,3 +65,13 @@ export const insertLiveSignalSchema = baseInsertSchema.extend({
 
 export type InsertLiveSignal = z.infer<typeof insertLiveSignalSchema>;
 export type LiveSignal = typeof liveSignals.$inferSelect;
+
+// ============================================================
+// Watchlist Table — Dynamic symbol list managed via dashboard
+// ============================================================
+export const watchlist = pgTable("watchlist", {
+  symbol: varchar("symbol", { length: 20 }).primaryKey(),
+  assetClass: varchar("asset_class", { length: 20 }).notNull().default("equity"),
+});
+
+export type WatchlistEntry = typeof watchlist.$inferSelect;

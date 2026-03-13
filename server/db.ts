@@ -51,6 +51,23 @@ export async function ensureTablesExist(): Promise<void> {
       )
     `);
     console.log("[DB] Table live_signals: OK");
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS watchlist (
+        symbol VARCHAR(20) PRIMARY KEY,
+        asset_class VARCHAR(20) NOT NULL DEFAULT 'equity'
+      )
+    `);
+    // Seed defaults if empty
+    await db.execute(sql`
+      INSERT INTO watchlist (symbol, asset_class) VALUES
+        ('BTC/USD', 'crypto'),
+        ('ETH/USD', 'crypto'),
+        ('AAPL', 'equity'),
+        ('TSLA', 'equity')
+      ON CONFLICT (symbol) DO NOTHING
+    `);
+    console.log("[DB] Table watchlist: OK (seeded defaults)");
   } catch (err) {
     console.error("[DB] Failed to ensure tables exist:", err);
   }

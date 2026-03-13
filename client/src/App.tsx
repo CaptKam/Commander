@@ -10,6 +10,9 @@ import {
   Target,
   BarChart3,
   Skull,
+  Plus,
+  Trash2,
+  Eye,
 } from "lucide-react";
 
 // ============================================================
@@ -81,6 +84,11 @@ interface ClosedTrade {
   tp2: number | null;
 }
 
+interface WatchlistEntry {
+  symbol: string;
+  assetClass: string;
+}
+
 const POLL_INTERVAL = 10_000;
 
 // ============================================================
@@ -121,11 +129,13 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [history, setHistory] = useState<ClosedTrade[]>([]);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistEntry[]>([]);
+  const [newSymbol, setNewSymbol] = useState("");
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, histRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -133,6 +143,7 @@ export default function App() {
           fetch("/api/status").then((r) => r.json()),
           fetch("/api/metrics").then((r) => r.json()),
           fetch("/api/history").then((r) => r.json()),
+          fetch("/api/watchlist").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value))
@@ -143,12 +154,41 @@ export default function App() {
       if (metRes.status === "fulfilled") setMetrics(metRes.value);
       if (histRes.status === "fulfilled" && Array.isArray(histRes.value))
         setHistory(histRes.value);
+      if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value))
+        setWatchlistItems(wlRes.value);
     } catch {
       // silent — dashboard will show stale data
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const addSymbol = useCallback(async () => {
+    const sym = newSymbol.trim().toUpperCase();
+    if (!sym) return;
+    try {
+      await fetch("/api/watchlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: sym }),
+      });
+      setNewSymbol("");
+      fetchAll();
+    } catch {
+      // silent
+    }
+  }, [newSymbol, fetchAll]);
+
+  const removeSymbol = useCallback(async (sym: string) => {
+    try {
+      await fetch(`/api/watchlist/${encodeURIComponent(sym)}`, {
+        method: "DELETE",
+      });
+      fetchAll();
+    } catch {
+      // silent
+    }
+  }, [fetchAll]);
 
   useEffect(() => {
     fetchAll();
@@ -413,6 +453,66 @@ export default function App() {
           )}
         </section>
       </div>
+
+      {/* ==================== WATCHLIST MANAGER ==================== */}
+      <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden mb-4">
+        <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+          <Eye className="w-4 h-4 text-amber-400" />
+          <h2 className="font-semibold text-sm">Watchlist Manager</h2>
+          <span className="text-xs text-gray-500 ml-auto">
+            {watchlistItems.length} symbols
+          </span>
+        </div>
+        <div className="p-4">
+          {/* Add symbol input */}
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addSymbol()}
+              placeholder="Add symbol (e.g. NVDA, SOL/USD)"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-amber-400/50"
+            />
+            <button
+              onClick={addSymbol}
+              className="bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-lg px-3 py-2 text-sm font-medium hover:bg-amber-400/20 transition-colors flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              Add
+            </button>
+          </div>
+          {/* Symbol chips */}
+          {watchlistItems.length === 0 ? (
+            <p className="text-gray-500 text-sm">No symbols in watchlist</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {watchlistItems.map((w) => (
+                <div
+                  key={w.symbol}
+                  className="flex items-center gap-1.5 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm group"
+                >
+                  <span
+                    className={`inline-block w-1.5 h-1.5 rounded-full ${
+                      w.assetClass === "crypto"
+                        ? "bg-orange-400"
+                        : "bg-blue-400"
+                    }`}
+                  />
+                  <span className="font-medium text-gray-200">{w.symbol}</span>
+                  <span className="text-xs text-gray-500">{w.assetClass}</span>
+                  <button
+                    onClick={() => removeSymbol(w.symbol)}
+                    className="ml-1 text-gray-600 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* ==================== TRADE HISTORY (Graveyard) ==================== */}
       <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
