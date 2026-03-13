@@ -1,6 +1,6 @@
 /**
- * Discord Notification Engine — Visual Command Center
- * Eliminates silent failures by pushing alerts to Discord via webhook.
+ * Telegram Notification Engine — Visual Command Center
+ * Eliminates silent failures by pushing alerts to Telegram via Bot API.
  *
  * Three notification types:
  *   1. System Boot   — confirms bot is alive and DB connected
@@ -8,7 +8,8 @@
  *   3. Phase C Signal — clickable TradingView deep-link for visual verification
  */
 
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 // TradingView interval mapping: our timeframes -> TV format
 const TV_INTERVAL_MAP: Record<string, string> = {
@@ -16,57 +17,58 @@ const TV_INTERVAL_MAP: Record<string, string> = {
   "4H": "240",
 };
 
-interface DiscordEmbed {
-  title: string;
-  description: string;
-  color: number;
-  fields?: { name: string; value: string; inline?: boolean }[];
-  timestamp?: string;
-}
-
-async function sendWebhook(
-  content: string,
-  embeds: DiscordEmbed[],
-): Promise<void> {
-  if (!DISCORD_WEBHOOK_URL) {
+/**
+ * Sends an HTML-formatted message to Telegram.
+ * Logs but never throws — notifications must not crash the trading engine.
+ * (CLAUDE.md Rule #4: Decoupled Architecture)
+ */
+async function sendTelegram(html: string): Promise<void> {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
     console.warn(
-      "[Notifier] DISCORD_WEBHOOK_URL not set — skipping notification",
+      "[Notifier] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — skipping",
     );
     return;
   }
 
-  const res = await fetch(DISCORD_WEBHOOK_URL, {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      username: "Pattern Bot",
-      content,
-      embeds,
+      chat_id: TELEGRAM_CHAT_ID,
+      text: html,
+      parse_mode: "HTML",
+      disable_web_page_preview: false,
     }),
   });
 
   if (!res.ok) {
-    // Log but never throw — notifications must not crash the trading engine
-    // (CLAUDE.md Rule #4: Decoupled Architecture)
-    console.error(
-      `[Notifier] Discord webhook failed: ${res.status} ${res.statusText}`,
-    );
+    const body = await res.text();
+    console.error(`[Notifier] Telegram send failed: ${res.status} — ${body}`);
   }
+}
+
+/**
+ * Escapes special HTML characters for Telegram's HTML parse mode.
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /**
  * Green alert: Bot is online and database is connected.
  */
 export async function sendSystemBoot(): Promise<void> {
-  await sendWebhook("", [
-    {
-      title: "🟢 Pattern Bot Online",
-      description:
-        "System booted successfully. Database connected. Scanners active.",
-      color: 0x00ff00,
-      timestamp: new Date().toISOString(),
-    },
-  ]);
+  await sendTelegram(
+    `🟢 <b>Pattern Bot Online</b>\n\n` +
+      `System booted successfully.\n` +
+      `Database connected. Scanners active.\n` +
+      `<i>${new Date().toISOString()}</i>`,
+  );
 }
 
 /**
@@ -80,29 +82,16 @@ export async function sendError(
     error instanceof Error ? error.message : String(error);
   const errorStack =
     error instanceof Error && error.stack
-      ? error.stack.slice(0, 1000)
+      ? error.stack.slice(0, 800)
       : "No stack trace";
 
-  await sendWebhook("", [
-    {
-      title: "🔴 Pattern Bot Error",
-      description: `**Context:** ${context}`,
-      color: 0xff0000,
-      fields: [
-        {
-          name: "Error",
-          value: `\`\`\`${errorMessage}\`\`\``,
-          inline: false,
-        },
-        {
-          name: "Stack",
-          value: `\`\`\`${errorStack}\`\`\``,
-          inline: false,
-        },
-      ],
-      timestamp: new Date().toISOString(),
-    },
-  ]);
+  await sendTelegram(
+    `🔴 <b>Pattern Bot Error</b>\n\n` +
+      `<b>Context:</b> ${escapeHtml(context)}\n\n` +
+      `<b>Error:</b>\n<code>${escapeHtml(errorMessage)}</code>\n\n` +
+      `<b>Stack:</b>\n<code>${escapeHtml(errorStack)}</code>\n\n` +
+      `<i>${new Date().toISOString()}</i>`,
+  );
 }
 
 /**
@@ -119,27 +108,13 @@ export async function sendPhaseCSignal(
   const tvUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${tvInterval}`;
   const directionEmoji = direction === "long" ? "🟢" : "🔴";
 
-  await sendWebhook("", [
-    {
-      title: `${directionEmoji} Phase C Signal: ${symbol}`,
-      description: `**${pattern}** detected on **${timeframe}** — [Open in TradingView](${tvUrl})`,
-      color: direction === "long" ? 0x00ff00 : 0xff0000,
-      fields: [
-        { name: "Pattern", value: pattern, inline: true },
-        { name: "Direction", value: direction.toUpperCase(), inline: true },
-        { name: "Timeframe", value: timeframe, inline: true },
-        {
-          name: "Limit Price",
-          value: `$${limitPrice.toLocaleString()}`,
-          inline: true,
-        },
-        {
-          name: "TradingView",
-          value: `[Click to View Chart](${tvUrl})`,
-          inline: false,
-        },
-      ],
-      timestamp: new Date().toISOString(),
-    },
-  ]);
+  await sendTelegram(
+    `${directionEmoji} <b>Phase C Signal: ${escapeHtml(symbol)}</b>\n\n` +
+      `<b>Pattern:</b> ${escapeHtml(pattern)}\n` +
+      `<b>Direction:</b> ${direction.toUpperCase()}\n` +
+      `<b>Timeframe:</b> ${timeframe}\n` +
+      `<b>Limit Price:</b> $${limitPrice.toLocaleString()}\n\n` +
+      `📊 <a href="${tvUrl}">Open in TradingView</a>\n\n` +
+      `<i>${new Date().toISOString()}</i>`,
+  );
 }
