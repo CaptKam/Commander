@@ -127,9 +127,24 @@ const PATTERN_DEFS: PatternRules[] = [
 ];
 
 // ============================================================
-// Pattern detection tolerance
+// Pattern detection tolerance & minimum leg filters
 // ============================================================
 const RATIO_TOLERANCE = 0.05;
+
+/**
+ * Minimum XA leg size as a percentage of price.
+ * Filters out micro-noise pivots that are too close together
+ * to form a real harmonic pattern. 1.5% ensures the XA swing
+ * is structurally significant (e.g., $3.75 on a $250 stock).
+ */
+const MIN_XA_LEG_PCT = 0.015;
+
+/**
+ * Minimum AD range as a percentage of price.
+ * Ensures projected D is far enough from A to produce
+ * meaningful TP/SL targets (not 3-cent spreads).
+ */
+const MIN_AD_RANGE_PCT = 0.01;
 
 // ============================================================
 // The main detection engine
@@ -175,6 +190,13 @@ export function detectHarmonics(
       continue;
     }
 
+    // ---- Minimum leg filter: reject micro-noise pivots ----
+    const xaSize = Math.abs(X.price - A.price);
+    const midPrice = (X.price + A.price) / 2;
+    if (xaSize / midPrice < MIN_XA_LEG_PCT) {
+      continue; // XA leg too small — noise, not structure
+    }
+
     // ---- Calculate leg ratios ----
     const xabRatio = calcRetrace(X.price, A.price, B.price);
     const abcRatio = calcRetrace(A.price, B.price, C.price);
@@ -213,6 +235,15 @@ export function detectHarmonics(
 
       // ---- Validate projected D is reasonable ----
       if (!Number.isFinite(projectedD) || projectedD <= 0) {
+        continue;
+      }
+
+      // ---- Minimum AD range: reject compressed targets ----
+      const adRangePct = Math.abs(A.price - projectedD) / A.price;
+      if (adRangePct < MIN_AD_RANGE_PCT) {
+        console.log(
+          `[Harmonics] Skipping ${symbol} ${timeframe} ${pattern.name} — AD range too small (${(adRangePct * 100).toFixed(2)}%)`,
+        );
         continue;
       }
 
