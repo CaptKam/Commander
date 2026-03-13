@@ -481,10 +481,18 @@ async function runScanCycle(): Promise<void> {
 // Boot Sequence — the single entry point for the entire bot
 // ============================================================
 export async function startEngine(): Promise<void> {
-  console.log("[Orchestrator] Booting Pattern Bot engine...");
+  console.log("[Orchestrator] Booting Pattern Bot engine — build 2026-03-13-v2 (market-hours + pagination + quality-logs)");
 
   // Ensure DB tables exist before first scan
   await ensureTablesExist();
+
+  // Verify watchlist populated correctly
+  try {
+    const symbols = await getActiveWatchlist();
+    console.log(`[Orchestrator] Watchlist loaded: ${symbols.length} symbols → ${symbols.join(", ")}`);
+  } catch (err) {
+    console.error("[Orchestrator] Watchlist verification failed:", err);
+  }
 
   // Fire the green "online" Telegram notification
   try {
