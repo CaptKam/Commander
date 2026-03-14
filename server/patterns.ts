@@ -285,6 +285,25 @@ export function detectHarmonics(
         continue;
       }
 
+      // Hard guard: TP/SL must be on the correct side of entry
+      if (direction === "long") {
+        if (tp1Price <= projectedD || tp2Price <= projectedD || stopLossPrice >= projectedD) {
+          console.error(
+            `[CRITICAL] Inverted TP/SL for LONG ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${projectedD.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+          );
+          continue;
+        }
+      } else {
+        if (tp1Price >= projectedD || tp2Price >= projectedD || stopLossPrice <= projectedD) {
+          console.error(
+            `[CRITICAL] Inverted TP/SL for SHORT ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${projectedD.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+          );
+          continue;
+        }
+      }
+
       console.log(
         `[Harmonics] ${symbol} ${timeframe} ${pattern.name} ${direction.toUpperCase()} — ` +
           `X=$${X.price.toFixed(2)}(idx${X.index}) A=$${A.price.toFixed(2)}(idx${A.index}) ` +
@@ -413,6 +432,25 @@ export function detectCompletedPatterns(
 
       if (tp1Price <= 0 || tp2Price <= 0 || stopLossPrice <= 0) {
         continue;
+      }
+
+      // Hard guard: TP/SL must be on the correct side of entry
+      if (direction === "long") {
+        if (tp1Price <= D.price || tp2Price <= D.price || stopLossPrice >= D.price) {
+          console.error(
+            `[CRITICAL] Inverted TP/SL for LONG ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${D.price.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+          );
+          continue;
+        }
+      } else {
+        if (tp1Price >= D.price || tp2Price >= D.price || stopLossPrice <= D.price) {
+          console.error(
+            `[CRITICAL] Inverted TP/SL for SHORT ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${D.price.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+          );
+          continue;
+        }
       }
 
       // ---- Slippage check: is current price still near D? ----
