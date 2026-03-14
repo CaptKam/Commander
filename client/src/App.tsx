@@ -131,10 +131,18 @@ const POLL_INTERVAL = 10_000;
 // Helpers
 // ============================================================
 function formatUsd(n: number): string {
+  // Sub-penny coins (SHIB, PEPE, etc.) need more decimal places
+  const abs = Math.abs(n);
+  const decimals =
+    abs === 0 ? 2 :
+    abs < 0.001 ? 8 :
+    abs < 0.1 ? 6 :
+    abs < 1 ? 4 : 2;
   return n.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 2,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
 }
 

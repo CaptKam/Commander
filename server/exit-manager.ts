@@ -103,6 +103,62 @@ async function placeOrder(payload: Record<string, string>): Promise<AlpacaOrder>
   return (await res.json()) as AlpacaOrder;
 }
 
+interface AlpacaPosition {
+  symbol: string;
+  qty: string;
+  side: string;
+  avg_entry_price: string;
+  current_price: string;
+  unrealized_pl: string;
+}
+
+/**
+ * Query the ACTUAL Alpaca position for a symbol.
+ * Returns the real qty held, not what we think we ordered.
+ */
+async function getPosition(symbol: string): Promise<AlpacaPosition | null> {
+  const { key, secret, base } = getAlpacaConfig();
+  try {
+    // Alpaca position endpoint uses symbol without slash for crypto
+    const encodedSymbol = encodeURIComponent(symbol);
+    const res = await fetch(`${base}/v2/positions/${encodedSymbol}`, {
+      headers: {
+        "APCA-API-KEY-ID": key,
+        "APCA-API-SECRET-KEY": secret,
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 404) return null; // No position
+      const body = await res.text();
+      console.warn(`[ExitManager] Position query ${symbol}: ${res.status} — ${body}`);
+      return null;
+    }
+    return (await res.json()) as AlpacaPosition;
+  } catch (err) {
+    console.error(`[ExitManager] Failed to query position ${symbol}:`, err);
+    return null;
+  }
+}
+
+/**
+ * Cancel all open orders for a symbol.
+ */
+async function cancelAllOrdersForSymbol(symbol: string): Promise<void> {
+  const { key, secret, base } = getAlpacaConfig();
+  try {
+    const res = await fetch(
+      `${base}/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`,
+      { headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret } },
+    );
+    if (!res.ok) return;
+    const orders = (await res.json()) as AlpacaOrder[];
+    await Promise.all(orders.map((o) => cancelOrder(o.id)));
+    console.log(`[ExitManager] Cancelled ${orders.length} open orders for ${symbol}`);
+  } catch (err) {
+    console.error(`[ExitManager] Failed to cancel orders for ${symbol}:`, err);
+  }
+}
+
 async function cancelOrder(orderId: string): Promise<boolean> {
   const { key, secret, base } = getAlpacaConfig();
   try {
@@ -274,8 +330,25 @@ export async function runExitCycle(): Promise<void> {
         );
 
         try {
+          // Query ACTUAL Alpaca position to get real qty held.
+          // This is the source of truth — not the order's filled_qty,
+          // which can differ due to partial fills or rounding.
+          const position = await getPosition(signal.symbol);
+          const actualQty = position ? position.qty : order.filled_qty;
+
+          if (!position) {
+            console.warn(
+              `[ExitManager] No Alpaca position found for ${signal.symbol} — ` +
+              `falling back to order filled_qty=${order.filled_qty}`,
+            );
+          } else {
+            console.log(
+              `[ExitManager] Alpaca position for ${signal.symbol}: qty=${position.qty} ` +
+              `(order filled_qty=${order.filled_qty})`,
+            );
+          }
+
           // Place TP1 + TP2 limit exit orders (SL monitored in software)
-          // Uses the ACTUAL filled_qty from Alpaca, not the requested qty
           const exits = await placeExitOrders({
             id: signal.id,
             symbol: signal.symbol,
@@ -283,7 +356,7 @@ export async function runExitCycle(): Promise<void> {
             tp1Price: signal.tp1Price,
             tp2Price: signal.tp2Price,
             stopLossPrice: signal.stopLossPrice,
-            filledQty: order.filled_qty,
+            filledQty: actualQty,
           });
 
           // Persist to DB (CLAUDE.md Rule #2 — never in-memory only)
@@ -291,7 +364,7 @@ export async function runExitCycle(): Promise<void> {
             .update(liveSignals)
             .set({
               status: "filled",
-              filledQty: order.filled_qty,
+              filledQty: actualQty,
               filledAvgPrice: order.filled_avg_price,
               tp1OrderId: exits.tp1Id,
               tp2OrderId: exits.tp2Id,
@@ -478,5 +551,76 @@ export async function runExitCycle(): Promise<void> {
   } catch (err) {
     console.error("[ExitManager] Exit cycle failed:", err);
     sendError("Exit manager cycle failed", err).catch(() => {});
+  }
+}
+
+// ============================================================
+// Manual fix for stuck positions — callable via API
+//
+// 1. Cancels ALL open Alpaca orders for the symbol
+// 2. Queries actual Alpaca position qty
+// 3. Places fresh TP1 + TP2 limit exits based on real position
+// 4. Updates the DB record
+// ============================================================
+export async function fixStuckExits(signalId: number): Promise<string> {
+  const signal = await db
+    .select()
+    .from(liveSignals)
+    .where(eq(liveSignals.id, signalId))
+    .then((rows) => rows[0]);
+
+  if (!signal) return `Signal #${signalId} not found`;
+
+  // Step 1: Cancel all open orders for this symbol on Alpaca
+  await cancelAllOrdersForSymbol(signal.symbol);
+
+  // Step 2: Query actual Alpaca position
+  const position = await getPosition(signal.symbol);
+  if (!position || Number(position.qty) <= 0) {
+    // No position — mark as closed
+    await db
+      .update(liveSignals)
+      .set({ status: "closed" })
+      .where(eq(liveSignals.id, signalId));
+    return `${signal.symbol} #${signalId}: no Alpaca position found — marked closed`;
+  }
+
+  const actualQty = position.qty;
+  console.log(
+    `[ExitManager] Fix stuck: ${signal.symbol} #${signalId} actual position qty=${actualQty}`,
+  );
+
+  // Step 3: Place fresh exit orders using actual position qty
+  try {
+    const exits = await placeExitOrders({
+      id: signal.id,
+      symbol: signal.symbol,
+      direction: signal.direction,
+      tp1Price: signal.tp1Price,
+      tp2Price: signal.tp2Price,
+      stopLossPrice: signal.stopLossPrice,
+      filledQty: actualQty,
+    });
+
+    // Step 4: Update DB
+    await db
+      .update(liveSignals)
+      .set({
+        status: "filled",
+        filledQty: actualQty,
+        tp1OrderId: exits.tp1Id,
+        tp2OrderId: exits.tp2Id,
+        exitRetries: 0,
+        executedAt: new Date(),
+      })
+      .where(eq(liveSignals.id, signalId));
+
+    return (
+      `${signal.symbol} #${signalId}: fixed — position qty=${actualQty}, ` +
+      `TP1=${exits.tp1Id}, TP2=${exits.tp2Id}`
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${signal.symbol} #${signalId}: exit order placement failed — ${msg}`;
   }
 }

@@ -9,6 +9,7 @@ import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice } from "./websocket-stream";
+import { fixStuckExits } from "./exit-manager";
 
 const router = Router();
 
@@ -470,7 +471,7 @@ router.get("/status", (_req, res) => {
  * GET /api/approaching — All pending Phase C signals with distance to projected D.
  * Uses WebSocket price if available, otherwise falls back to the latest
  * candle close from cached REST data (refreshed every 30s scan cycle).
- * Returns ALL signals regardless of distance, sorted by closest first.
+ * Returns signals within 50% distance of projected D, sorted by closest first.
  */
 router.get("/approaching", async (_req, res) => {
   try {
@@ -517,7 +518,7 @@ router.get("/approaching", async (_req, res) => {
           createdAt: s.createdAt,
         };
       })
-      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 50)
       .sort((a, b) => a.distancePct - b.distancePct);
 
     res.json(enriched);
@@ -539,6 +540,27 @@ router.post("/signals/clear", async (_req, res) => {
   } catch (err) {
     console.error("[API] Failed to clear signals:", err);
     res.status(500).json({ error: "Failed to clear signals" });
+  }
+});
+
+/**
+ * POST /api/fix-exits/:id — Manually fix a stuck position.
+ * Cancels all open Alpaca orders for the symbol, queries actual
+ * position qty, and places fresh TP1 + TP2 limit exits.
+ */
+router.post("/fix-exits/:id", async (req, res) => {
+  try {
+    const signalId = Number(req.params.id);
+    if (!Number.isFinite(signalId) || signalId <= 0) {
+      res.status(400).json({ error: "Invalid signal ID" });
+      return;
+    }
+    const result = await fixStuckExits(signalId);
+    console.log(`[API] fix-exits: ${result}`);
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error("[API] fix-exits failed:", err);
+    res.status(500).json({ error: "Failed to fix exits" });
   }
 });
 
