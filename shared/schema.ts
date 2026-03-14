@@ -39,6 +39,7 @@ export const liveSignals = pgTable("live_signals", {
   slOrderId: text("sl_order_id"),
   filledQty: numeric("filled_qty", { precision: 20, scale: 10 }),
   filledAvgPrice: numeric("filled_avg_price", { precision: 20, scale: 10 }),
+  exitRetries: integer("exit_retries").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   executedAt: timestamp("executed_at"),
 });

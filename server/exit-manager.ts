@@ -9,6 +9,7 @@
  *   filled       → Entry filled, TP1/TP2 limit exits placed
  *   partial_exit → TP1 hit, remaining half protected by TP2 + software SL
  *   closed       → All exits complete (both TPs or SL triggered)
+ *   exit_failed  → Exit order placement failed 3x, needs manual intervention
  *   cancelled    → Entry order cancelled/expired on Alpaca
  *
  * SL Architecture: Alpaca crypto rejects standalone "stop" orders and enforces
@@ -123,12 +124,20 @@ async function cancelOrder(orderId: string): Promise<boolean> {
 }
 
 // ============================================================
+// Constants
+// ============================================================
+const MAX_EXIT_RETRIES = 3;
+
+// ============================================================
 // Exit order placement — TP1 + TP2 (limit only, split 50/50)
 //
 // SL is NOT placed as a separate order because Alpaca enforces
 // that total pending sell qty cannot exceed position size.
 // TP1 (50%) + TP2 (50%) = 100%, leaving no room for a separate SL.
 // Instead, SL is monitored software-side in the exit cycle (Phase 3).
+//
+// Quantity split uses floor() for TP1, remainder for TP2, so
+// TP1 + TP2 = exactly filledQty with zero rounding overflow.
 // ============================================================
 async function placeExitOrders(signal: {
   id: number;
@@ -141,8 +150,15 @@ async function placeExitOrders(signal: {
 }): Promise<{ tp1Id: string; tp2Id: string }> {
   const isCrypto = signal.symbol.includes("/");
   const totalQty = Number(signal.filledQty);
-  const tp1Qty = totalQty / 2;
-  const tp2Qty = totalQty - tp1Qty; // Avoids rounding loss
+
+  // Floor-based split: TP1 gets floor(50%), TP2 gets the remainder.
+  // This guarantees TP1 + TP2 = totalQty exactly, no overflow.
+  const tp1Qty = isCrypto
+    ? Math.floor(totalQty * 0.5 * 1e9) / 1e9   // floor to 9 decimals (crypto max)
+    : Math.floor(totalQty * 0.5);                // whole shares for equities
+  const tp2Qty = isCrypto
+    ? Math.round((totalQty - tp1Qty) * 1e9) / 1e9
+    : totalQty - tp1Qty;
 
   // Exit side is opposite of entry
   const exitSide = signal.direction === "long" ? "sell" : "buy";
@@ -245,6 +261,9 @@ export async function runExitCycle(): Promise<void> {
     for (const signal of pendingSignals) {
       if (!signal.entryOrderId) continue; // No order placed yet
 
+      // Skip signals that have exhausted exit retries
+      if (signal.exitRetries >= MAX_EXIT_RETRIES) continue;
+
       const order = await getOrder(signal.entryOrderId);
       if (!order) continue;
 
@@ -256,6 +275,7 @@ export async function runExitCycle(): Promise<void> {
 
         try {
           // Place TP1 + TP2 limit exit orders (SL monitored in software)
+          // Uses the ACTUAL filled_qty from Alpaca, not the requested qty
           const exits = await placeExitOrders({
             id: signal.id,
             symbol: signal.symbol,
@@ -279,11 +299,42 @@ export async function runExitCycle(): Promise<void> {
             })
             .where(eq(liveSignals.id, signal.id));
         } catch (err) {
+          const retries = signal.exitRetries + 1;
           console.error(
-            `[ExitManager] Failed to place exit orders for ${signal.symbol} #${signal.id}:`,
+            `[ExitManager] Failed to place exit orders for ${signal.symbol} #${signal.id} ` +
+            `(attempt ${retries}/${MAX_EXIT_RETRIES}):`,
             err,
           );
-          sendError(`Exit order placement failed: ${signal.symbol}`, err).catch(() => {});
+
+          if (retries >= MAX_EXIT_RETRIES) {
+            // Stop retrying — mark as exit_failed and alert
+            console.warn(
+              `[Exit] ${signal.symbol} exit order failed ${MAX_EXIT_RETRIES}x — manual intervention needed`,
+            );
+            await db
+              .update(liveSignals)
+              .set({
+                status: "exit_failed",
+                filledQty: order.filled_qty,
+                filledAvgPrice: order.filled_avg_price,
+                exitRetries: retries,
+              })
+              .where(eq(liveSignals.id, signal.id));
+            sendError(
+              `${signal.symbol} exit order failed ${MAX_EXIT_RETRIES}x — manual intervention needed`,
+              err,
+            ).catch(() => {});
+          } else {
+            // Increment retry counter, stay pending for next cycle
+            await db
+              .update(liveSignals)
+              .set({
+                exitRetries: retries,
+                filledQty: order.filled_qty,
+                filledAvgPrice: order.filled_avg_price,
+              })
+              .where(eq(liveSignals.id, signal.id));
+          }
         }
       } else if (
         order.status === "cancelled" ||
@@ -381,11 +432,17 @@ export async function runExitCycle(): Promise<void> {
         const exitSide = signal.direction === "long" ? "sell" : "buy";
 
         // Determine remaining qty based on which TPs have filled
+        // Uses same floor-based split as placeExitOrders for consistency
         let remainingQty = totalQty;
         if (signal.tp1OrderId) {
           const tp1 = await getOrder(signal.tp1OrderId);
           if (tp1?.status === "filled") {
-            remainingQty = totalQty - (totalQty / 2); // TP1 was 50%
+            const tp1Qty = isCrypto
+              ? Math.floor(totalQty * 0.5 * 1e9) / 1e9
+              : Math.floor(totalQty * 0.5);
+            remainingQty = isCrypto
+              ? Math.round((totalQty - tp1Qty) * 1e9) / 1e9
+              : totalQty - tp1Qty;
           }
         }
 
