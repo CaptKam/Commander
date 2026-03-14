@@ -470,7 +470,7 @@ router.get("/status", (_req, res) => {
  * GET /api/approaching — All pending Phase C signals with distance to projected D.
  * Uses WebSocket price if available, otherwise falls back to the latest
  * candle close from cached REST data (refreshed every 30s scan cycle).
- * Returns ALL signals up to 50% away, sorted by closest first.
+ * Returns ALL signals regardless of distance, sorted by closest first.
  */
 router.get("/approaching", async (_req, res) => {
   try {
@@ -478,8 +478,7 @@ router.get("/approaching", async (_req, res) => {
       .select()
       .from(liveSignals)
       .where(eq(liveSignals.status, "pending"))
-      .orderBy(desc(liveSignals.createdAt))
-      .limit(100);
+      .orderBy(desc(liveSignals.createdAt));
 
     const enriched = pending
       .map((s) => {
@@ -518,7 +517,7 @@ router.get("/approaching", async (_req, res) => {
           createdAt: s.createdAt,
         };
       })
-      .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 50)
+      .filter((s): s is NonNullable<typeof s> => s !== null)
       .sort((a, b) => a.distancePct - b.distancePct);
 
     res.json(enriched);
