@@ -471,7 +471,13 @@ router.get("/approaching", async (_req, res) => {
         const streamPrice = getStreamPrice(s.symbol);
         if (streamPrice === null) return null;
         const entry = Number(s.entryPrice);
+        const aPrice = s.aPrice ? Number(s.aPrice) : null;
         const distPct = entry > 0 ? (Math.abs(streamPrice - entry) / streamPrice) * 100 : 999;
+        // TP3 = full move back to A (1.0 AD retracement), computed on the fly
+        const adRange = aPrice !== null ? Math.abs(aPrice - entry) : 0;
+        const tp3 = aPrice !== null
+          ? (s.direction === "long" ? entry + adRange : entry - adRange)
+          : null;
         return {
           id: s.id,
           symbol: s.symbol,
@@ -483,8 +489,9 @@ router.get("/approaching", async (_req, res) => {
           sl: Number(s.stopLossPrice),
           tp1: Number(s.tp1Price),
           tp2: Number(s.tp2Price),
+          tp3,
           x: s.xPrice ? Number(s.xPrice) : null,
-          a: s.aPrice ? Number(s.aPrice) : null,
+          a: aPrice,
           b: s.bPrice ? Number(s.bPrice) : null,
           c: s.cPrice ? Number(s.cPrice) : null,
           distancePct: Math.round(distPct * 100) / 100,
