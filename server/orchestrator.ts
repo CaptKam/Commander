@@ -416,7 +416,7 @@ async function runScanCycle(): Promise<void> {
           );
         } else if (isCrypto && signal.direction === "short") {
           console.log(
-            `[Alpaca] Skipping crypto SHORT — cannot short crypto without holdings: ${signal.symbol} ${signal.pattern}`,
+            `[Alpaca] Crypto SHORT signal saved but not traded — Alpaca does not support crypto shorting: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
           );
         } else if (equity !== null) {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
