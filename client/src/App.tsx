@@ -383,8 +383,7 @@ export default function App() {
       </header>
 
       {/* ==================== APPROACHING TRADES ==================== */}
-      {approaching.length > 0 && (
-        <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden mb-4">
+      <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden mb-4">
           <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
             <Target className="w-4 h-4 text-rose-400" />
             <h2 className="font-semibold text-sm">Approaching Trades</h2>
@@ -395,6 +394,11 @@ export default function App() {
               {approaching.filter((s) => s.distancePct < 5).length} imminent · {approaching.length} tracking
             </span>
           </div>
+          {approaching.length === 0 ? (
+            <div className="p-8 text-center text-gray-500 text-sm">
+              No approaching signals — waiting for pending Phase C signals with live price data
+            </div>
+          ) : (
           <div className="max-h-[700px] overflow-y-auto divide-y divide-gray-800/50">
             {approaching.map((s, i) => {
               const isLong = s.direction === "long";
@@ -581,8 +585,8 @@ export default function App() {
               );
             })}
           </div>
+          )}
         </section>
-      )}
 
       {/* ==================== BODY ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
