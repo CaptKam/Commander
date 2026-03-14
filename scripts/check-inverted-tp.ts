@@ -2,11 +2,19 @@
  * One-off script: find all live_signals where TP is inverted relative to entry.
  * Run with: npx tsx scripts/check-inverted-tp.ts
  */
-import { db } from "../server/db";
-import { sql } from "drizzle-orm";
+import pkg from "pg";
+const { Pool } = pkg;
+
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error("DATABASE_URL is not set");
+  process.exit(1);
+}
+
+const pool = new Pool({ connectionString: DATABASE_URL });
 
 async function main() {
-  const result = await db.execute(sql`
+  const { rows } = await pool.query(`
     SELECT id, symbol, pattern_type, timeframe, direction,
            entry_price, stop_loss_price, tp1_price, tp2_price,
            status, created_at
@@ -16,11 +24,11 @@ async function main() {
     ORDER BY created_at DESC
   `);
 
-  if (result.rows.length === 0) {
-    console.log("✅ No inverted TP signals found in the database.");
+  if (rows.length === 0) {
+    console.log("No inverted TP signals found in the database.");
   } else {
-    console.log(`⚠️  Found ${result.rows.length} inverted TP signal(s):\n`);
-    for (const row of result.rows) {
+    console.log(`Found ${rows.length} inverted TP signal(s):\n`);
+    for (const row of rows) {
       console.log(
         `  ID=${row.id} ${row.symbol} ${row.pattern_type} ${row.timeframe} ${row.direction} ` +
         `| entry=${row.entry_price} TP1=${row.tp1_price} TP2=${row.tp2_price} SL=${row.stop_loss_price} ` +
@@ -30,7 +38,7 @@ async function main() {
   }
 
   // Also check SL inversion
-  const slResult = await db.execute(sql`
+  const slResult = await pool.query(`
     SELECT id, symbol, pattern_type, timeframe, direction,
            entry_price, stop_loss_price, tp1_price, tp2_price
     FROM live_signals
@@ -40,9 +48,9 @@ async function main() {
   `);
 
   if (slResult.rows.length === 0) {
-    console.log("✅ No inverted SL signals found in the database.");
+    console.log("No inverted SL signals found in the database.");
   } else {
-    console.log(`\n⚠️  Found ${slResult.rows.length} inverted SL signal(s):\n`);
+    console.log(`\nFound ${slResult.rows.length} inverted SL signal(s):\n`);
     for (const row of slResult.rows) {
       console.log(
         `  ID=${row.id} ${row.symbol} ${row.pattern_type} ${row.direction} ` +
@@ -51,7 +59,7 @@ async function main() {
     }
   }
 
-  process.exit(0);
+  await pool.end();
 }
 
 main().catch((err) => {
