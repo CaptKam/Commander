@@ -103,7 +103,7 @@ router.get("/positions", async (_req, res) => {
           symbol: p.symbol,
           qty: Number(p.qty),
           side: p.side,
-          entry_price: Number(p.avg_entry_price),
+          entry_price: sig ? Number(sig.entryPrice) : Number(p.avg_entry_price),
           current_price: Number(p.current_price),
           market_value: Number(p.market_value),
           unrealized_pl: Number(p.unrealized_pl),
