@@ -2,14 +2,20 @@
  * Exit Manager — Automated TP/SL Order Lifecycle
  *
  * Completes the automation loop:
- *   Entry fills → place TP1 + TP2 (limit) + SL (stop) → monitor fills → cancel counterparts
+ *   Entry fills → place TP1 + TP2 (limit) → software SL monitors price → market exit if breached
  *
  * Lifecycle:
- *   pending    → Entry order placed, waiting for fill
- *   filled     → Entry filled, exit orders (TP1/TP2/SL) placed
- *   partial_exit → TP1 hit, SL qty reduced to remaining half
- *   closed     → All exits complete (TP2 or SL filled)
- *   cancelled  → Entry order cancelled/expired on Alpaca
+ *   pending      → Entry order placed, waiting for fill
+ *   filled       → Entry filled, TP1/TP2 limit exits placed
+ *   partial_exit → TP1 hit, remaining half protected by TP2 + software SL
+ *   closed       → All exits complete (both TPs or SL triggered)
+ *   cancelled    → Entry order cancelled/expired on Alpaca
+ *
+ * SL Architecture: Alpaca crypto rejects standalone "stop" orders and enforces
+ * that total pending sell qty cannot exceed position size. Since TP1 (50%) +
+ * TP2 (50%) = 100% of position, there's no room for a separate SL order.
+ * Instead, Phase 3 of the exit cycle checks price each scan (~30s) and
+ * fires a market exit if the SL level is breached.
  *
  * Called once per orchestrator scan cycle (~30s). Stays under Alpaca rate limits
  * by batching order status checks via GET /v2/orders (single call per batch).
@@ -23,6 +29,8 @@ import { liveSignals } from "../shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { formatAlpacaQty, formatAlpacaPrice } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
+import { getStreamPrice } from "./websocket-stream";
+import { getLatestCachedPrice } from "./alpaca-data";
 
 // ============================================================
 // Environment
@@ -115,7 +123,12 @@ async function cancelOrder(orderId: string): Promise<boolean> {
 }
 
 // ============================================================
-// Exit order placement — TP1 + TP2 (limit) + SL (stop)
+// Exit order placement — TP1 + TP2 (limit only, split 50/50)
+//
+// SL is NOT placed as a separate order because Alpaca enforces
+// that total pending sell qty cannot exceed position size.
+// TP1 (50%) + TP2 (50%) = 100%, leaving no room for a separate SL.
+// Instead, SL is monitored software-side in the exit cycle (Phase 3).
 // ============================================================
 async function placeExitOrders(signal: {
   id: number;
@@ -125,7 +138,7 @@ async function placeExitOrders(signal: {
   tp2Price: string;
   stopLossPrice: string;
   filledQty: string;
-}): Promise<{ tp1Id: string; tp2Id: string; slId: string }> {
+}): Promise<{ tp1Id: string; tp2Id: string }> {
   const isCrypto = signal.symbol.includes("/");
   const totalQty = Number(signal.filledQty);
   const tp1Qty = totalQty / 2;
@@ -137,19 +150,17 @@ async function placeExitOrders(signal: {
   // Anti-422 formatting (CLAUDE.md Rule #1)
   const safeTp1Qty = formatAlpacaQty(tp1Qty, isCrypto);
   const safeTp2Qty = formatAlpacaQty(tp2Qty, isCrypto);
-  const safeSlQty = formatAlpacaQty(totalQty, isCrypto);
   const safeTp1Price = formatAlpacaPrice(Number(signal.tp1Price), isCrypto);
   const safeTp2Price = formatAlpacaPrice(Number(signal.tp2Price), isCrypto);
-  const safeSlPrice = formatAlpacaPrice(Number(signal.stopLossPrice), isCrypto);
 
   console.log(
     `[ExitManager] Placing exit orders for ${signal.symbol} #${signal.id}: ` +
     `TP1=${safeTp1Price} (qty ${safeTp1Qty}), TP2=${safeTp2Price} (qty ${safeTp2Qty}), ` +
-    `SL=${safeSlPrice} (qty ${safeSlQty})`,
+    `SL=${formatAlpacaPrice(Number(signal.stopLossPrice), isCrypto)} (software-monitored)`,
   );
 
-  // Place all three exit orders
-  const [tp1Order, tp2Order, slOrder] = await Promise.all([
+  // Place TP1 + TP2 as limit orders (50/50 split = 100% of position)
+  const [tp1Order, tp2Order] = await Promise.all([
     placeOrder({
       symbol: signal.symbol,
       qty: String(safeTp1Qty),
@@ -166,22 +177,56 @@ async function placeExitOrders(signal: {
       time_in_force: "gtc",
       limit_price: String(safeTp2Price),
     }),
-    placeOrder({
-      symbol: signal.symbol,
-      qty: String(safeSlQty),
-      side: exitSide,
-      type: "stop",
-      time_in_force: "gtc",
-      stop_price: String(safeSlPrice),
-    }),
   ]);
 
   console.log(
     `[ExitManager] Exit orders placed for ${signal.symbol}: ` +
-    `TP1=${tp1Order.id}, TP2=${tp2Order.id}, SL=${slOrder.id}`,
+    `TP1=${tp1Order.id}, TP2=${tp2Order.id}`,
   );
 
-  return { tp1Id: tp1Order.id, tp2Id: tp2Order.id, slId: slOrder.id };
+  return { tp1Id: tp1Order.id, tp2Id: tp2Order.id };
+}
+
+// ============================================================
+// Software SL — Get current price for a symbol
+// ============================================================
+function getCurrentPrice(symbol: string): number | null {
+  return getStreamPrice(symbol) ?? getLatestCachedPrice(symbol);
+}
+
+/**
+ * Check if the stop loss level has been breached.
+ * For longs: price dropped below SL. For shorts: price rose above SL.
+ */
+function isSlBreached(
+  direction: string,
+  currentPrice: number,
+  slPrice: number,
+): boolean {
+  return direction === "long"
+    ? currentPrice <= slPrice
+    : currentPrice >= slPrice;
+}
+
+/**
+ * Place a market order to exit the full remaining position immediately.
+ * Used when software SL detects a breach — market orders are supported
+ * for both crypto and equities on Alpaca.
+ */
+async function placeMarketExit(
+  symbol: string,
+  qty: number,
+  side: string,
+  isCrypto: boolean,
+): Promise<AlpacaOrder> {
+  const safeQty = formatAlpacaQty(qty, isCrypto);
+  return placeOrder({
+    symbol,
+    qty: String(safeQty),
+    side,
+    type: "market",
+    time_in_force: "gtc",
+  });
 }
 
 // ============================================================
@@ -210,7 +255,7 @@ export async function runExitCycle(): Promise<void> {
         );
 
         try {
-          // Place TP1 + TP2 + SL exit orders
+          // Place TP1 + TP2 limit exit orders (SL monitored in software)
           const exits = await placeExitOrders({
             id: signal.id,
             symbol: signal.symbol,
@@ -230,7 +275,6 @@ export async function runExitCycle(): Promise<void> {
               filledAvgPrice: order.filled_avg_price,
               tp1OrderId: exits.tp1Id,
               tp2OrderId: exits.tp2Id,
-              slOrderId: exits.slId,
               executedAt: new Date(),
             })
             .where(eq(liveSignals.id, signal.id));
@@ -258,7 +302,7 @@ export async function runExitCycle(): Promise<void> {
     }
 
     // ============================================================
-    // Phase 2: Check filled entries for exit order fills
+    // Phase 2: Check filled entries for TP order fills
     // ============================================================
     const filledSignals = await db
       .select()
@@ -266,32 +310,16 @@ export async function runExitCycle(): Promise<void> {
       .where(inArray(liveSignals.status, ["filled", "partial_exit"]));
 
     for (const signal of filledSignals) {
-      if (!signal.tp1OrderId || !signal.tp2OrderId || !signal.slOrderId) continue;
+      if (!signal.tp1OrderId || !signal.tp2OrderId) continue;
 
-      const [tp1, tp2, sl] = await Promise.all([
+      const [tp1, tp2] = await Promise.all([
         getOrder(signal.tp1OrderId),
         getOrder(signal.tp2OrderId),
-        getOrder(signal.slOrderId),
       ]);
 
-      // ---- SL filled: cancel all TP orders, mark closed ----
-      if (sl?.status === "filled") {
-        console.log(`[ExitManager] SL HIT: ${signal.symbol} #${signal.id}`);
-        await Promise.all([
-          cancelOrder(signal.tp1OrderId),
-          cancelOrder(signal.tp2OrderId),
-        ]);
-        await db
-          .update(liveSignals)
-          .set({ status: "closed" })
-          .where(eq(liveSignals.id, signal.id));
-        continue;
-      }
-
-      // ---- Both TPs filled: cancel SL, mark closed ----
+      // ---- Both TPs filled: mark closed ----
       if (tp1?.status === "filled" && tp2?.status === "filled") {
         console.log(`[ExitManager] Both TPs HIT: ${signal.symbol} #${signal.id}`);
-        await cancelOrder(signal.slOrderId);
         await db
           .update(liveSignals)
           .set({ status: "closed" })
@@ -299,61 +327,95 @@ export async function runExitCycle(): Promise<void> {
         continue;
       }
 
-      // ---- TP1 filled (partial exit): reduce SL qty to remaining half ----
+      // ---- TP1 filled (partial exit): update status ----
       if (tp1?.status === "filled" && signal.status === "filled") {
-        console.log(`[ExitManager] TP1 HIT: ${signal.symbol} #${signal.id} — reducing SL qty`);
-
-        try {
-          // Cancel the full-qty SL and re-place with half qty
-          await cancelOrder(signal.slOrderId);
-
-          const isCrypto = signal.symbol.includes("/");
-          const totalQty = Number(signal.filledQty);
-          const remainingQty = totalQty / 2;
-          const exitSide = signal.direction === "long" ? "sell" : "buy";
-          const safeSlQty = formatAlpacaQty(remainingQty, isCrypto);
-          const safeSlPrice = formatAlpacaPrice(Number(signal.stopLossPrice), isCrypto);
-
-          const newSlOrder = await placeOrder({
-            symbol: signal.symbol,
-            qty: String(safeSlQty),
-            side: exitSide,
-            type: "stop",
-            time_in_force: "gtc",
-            stop_price: String(safeSlPrice),
-          });
-
-          await db
-            .update(liveSignals)
-            .set({
-              status: "partial_exit",
-              slOrderId: newSlOrder.id,
-            })
-            .where(eq(liveSignals.id, signal.id));
-
-          console.log(
-            `[ExitManager] SL replaced for ${signal.symbol} #${signal.id}: ` +
-            `new SL order ${newSlOrder.id} qty=${safeSlQty}`,
-          );
-        } catch (err) {
-          console.error(
-            `[ExitManager] Failed to adjust SL for ${signal.symbol} #${signal.id}:`,
-            err,
-          );
-          sendError(`SL adjustment failed: ${signal.symbol}`, err).catch(() => {});
-        }
+        console.log(`[ExitManager] TP1 HIT: ${signal.symbol} #${signal.id} — partial exit`);
+        await db
+          .update(liveSignals)
+          .set({ status: "partial_exit" })
+          .where(eq(liveSignals.id, signal.id));
         continue;
       }
 
-      // ---- TP2 filled after partial_exit: cancel SL, mark closed ----
+      // ---- TP2 filled after partial_exit: mark closed ----
       if (tp2?.status === "filled" && signal.status === "partial_exit") {
         console.log(`[ExitManager] TP2 HIT: ${signal.symbol} #${signal.id} — fully closed`);
-        await cancelOrder(signal.slOrderId);
         await db
           .update(liveSignals)
           .set({ status: "closed" })
           .where(eq(liveSignals.id, signal.id));
         continue;
+      }
+    }
+
+    // ============================================================
+    // Phase 3: Software SL — monitor price vs stop loss level
+    //
+    // Alpaca crypto doesn't support standalone "stop" orders alongside
+    // existing limit TPs (aggregate qty would exceed position).
+    // Instead we check price each cycle (~30s) and market-sell if breached.
+    // ============================================================
+    const openSignals = await db
+      .select()
+      .from(liveSignals)
+      .where(inArray(liveSignals.status, ["filled", "partial_exit"]));
+
+    for (const signal of openSignals) {
+      const slPrice = Number(signal.stopLossPrice);
+      if (!slPrice || slPrice <= 0) continue;
+
+      const currentPrice = getCurrentPrice(signal.symbol);
+      if (currentPrice === null) continue; // No price data available this cycle
+
+      if (!isSlBreached(signal.direction, currentPrice, slPrice)) continue;
+
+      // SL breached — emergency market exit
+      console.log(
+        `[ExitManager] SOFTWARE SL TRIGGERED: ${signal.symbol} #${signal.id} ` +
+        `price=${currentPrice} sl=${slPrice} direction=${signal.direction}`,
+      );
+
+      try {
+        const isCrypto = signal.symbol.includes("/");
+        const totalQty = Number(signal.filledQty);
+        const exitSide = signal.direction === "long" ? "sell" : "buy";
+
+        // Determine remaining qty based on which TPs have filled
+        let remainingQty = totalQty;
+        if (signal.tp1OrderId) {
+          const tp1 = await getOrder(signal.tp1OrderId);
+          if (tp1?.status === "filled") {
+            remainingQty = totalQty - (totalQty / 2); // TP1 was 50%
+          }
+        }
+
+        // Cancel any outstanding TP orders before market exit
+        const cancels: Promise<boolean>[] = [];
+        if (signal.tp1OrderId) cancels.push(cancelOrder(signal.tp1OrderId));
+        if (signal.tp2OrderId) cancels.push(cancelOrder(signal.tp2OrderId));
+        await Promise.all(cancels);
+
+        // Market sell remaining position
+        const slOrder = await placeMarketExit(signal.symbol, remainingQty, exitSide, isCrypto);
+
+        console.log(
+          `[ExitManager] SL market exit placed: ${signal.symbol} #${signal.id} ` +
+          `order=${slOrder.id} qty=${remainingQty}`,
+        );
+
+        await db
+          .update(liveSignals)
+          .set({
+            status: "closed",
+            slOrderId: slOrder.id,
+          })
+          .where(eq(liveSignals.id, signal.id));
+      } catch (err) {
+        console.error(
+          `[ExitManager] SL market exit FAILED for ${signal.symbol} #${signal.id}:`,
+          err,
+        );
+        sendError(`Software SL exit failed: ${signal.symbol} — MANUAL INTERVENTION NEEDED`, err).catch(() => {});
       }
     }
   } catch (err) {
