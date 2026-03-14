@@ -7,7 +7,7 @@ import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
-import { getCacheStats } from "./alpaca-data";
+import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice } from "./websocket-stream";
 
 const router = Router();
@@ -467,8 +467,10 @@ router.get("/status", (_req, res) => {
 });
 
 /**
- * GET /api/approaching — Pending Phase C signals enriched with live WebSocket prices.
- * Returns signals sorted by distance to projected D (closest first).
+ * GET /api/approaching — All pending Phase C signals with distance to projected D.
+ * Uses WebSocket price if available, otherwise falls back to the latest
+ * candle close from cached REST data (refreshed every 30s scan cycle).
+ * Returns ALL signals up to 50% away, sorted by closest first.
  */
 router.get("/approaching", async (_req, res) => {
   try {
@@ -477,20 +479,24 @@ router.get("/approaching", async (_req, res) => {
       .from(liveSignals)
       .where(eq(liveSignals.status, "pending"))
       .orderBy(desc(liveSignals.createdAt))
-      .limit(50);
+      .limit(100);
 
     const enriched = pending
       .map((s) => {
-        const streamPrice = getStreamPrice(s.symbol);
-        if (streamPrice === null) return null;
+        // Best price: WebSocket stream > cached candle close
+        const currentPrice = getStreamPrice(s.symbol) ?? getLatestCachedPrice(s.symbol);
+        if (currentPrice === null) return null;
+
         const entry = Number(s.entryPrice);
         const aPrice = s.aPrice ? Number(s.aPrice) : null;
-        const distPct = entry > 0 ? (Math.abs(streamPrice - entry) / streamPrice) * 100 : 999;
+        const distPct = entry > 0 ? (Math.abs(currentPrice - entry) / currentPrice) * 100 : 999;
+
         // TP3 = full move back to A (1.0 AD retracement), computed on the fly
         const adRange = aPrice !== null ? Math.abs(aPrice - entry) : 0;
         const tp3 = aPrice !== null
           ? (s.direction === "long" ? entry + adRange : entry - adRange)
           : null;
+
         return {
           id: s.id,
           symbol: s.symbol,
@@ -498,7 +504,8 @@ router.get("/approaching", async (_req, res) => {
           direction: s.direction,
           timeframe: s.timeframe,
           projectedD: entry,
-          currentPrice: streamPrice,
+          currentPrice,
+          priceSource: getStreamPrice(s.symbol) !== null ? "stream" : "candle",
           sl: Number(s.stopLossPrice),
           tp1: Number(s.tp1Price),
           tp2: Number(s.tp2Price),
@@ -511,7 +518,7 @@ router.get("/approaching", async (_req, res) => {
           createdAt: s.createdAt,
         };
       })
-      .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 25)
+      .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 50)
       .sort((a, b) => a.distancePct - b.distancePct);
 
     res.json(enriched);

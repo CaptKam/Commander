@@ -493,6 +493,31 @@ export async function fetchCandles(
 }
 
 /**
+ * Returns the most recent close price for a symbol from the candle cache.
+ * Checks 4H first (fresher, 5-min TTL), then falls back to 1D.
+ * Returns null if no cached data exists.
+ */
+export function getLatestCachedPrice(symbol: string): number | null {
+  const now = Date.now();
+
+  // Prefer 4H data (5-min TTL, most recent)
+  const key4h = getCacheKey(symbol, "4H");
+  const cached4h = cache.get(key4h);
+  if (cached4h && cached4h.expiresAt > now && cached4h.candles.length > 0) {
+    return cached4h.candles[cached4h.candles.length - 1].close;
+  }
+
+  // Fall back to 1D data (2-hour TTL)
+  const key1d = getCacheKey(symbol, "1D");
+  const cached1d = cache.get(key1d);
+  if (cached1d && cached1d.expiresAt > now && cached1d.candles.length > 0) {
+    return cached1d.candles[cached1d.candles.length - 1].close;
+  }
+
+  return null;
+}
+
+/**
  * Returns current cache stats for monitoring/debugging.
  */
 export function getCacheStats(): { entries: number; symbols: string[] } {
