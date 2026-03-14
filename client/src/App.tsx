@@ -92,6 +92,26 @@ interface ClosedTrade {
   tp2: number | null;
 }
 
+interface ApproachingSignal {
+  id: number;
+  symbol: string;
+  pattern: string;
+  direction: string;
+  timeframe: string;
+  projectedD: number;
+  currentPrice: number;
+  sl: number;
+  tp1: number;
+  tp2: number;
+  tp3: number | null;
+  x: number | null;
+  a: number | null;
+  b: number | null;
+  c: number | null;
+  distancePct: number;
+  createdAt: string;
+}
+
 interface WatchlistEntry {
   symbol: string;
   assetClass: string;
@@ -148,12 +168,13 @@ export default function App() {
   const [watchlistItems, setWatchlistItems] = useState<WatchlistEntry[]>([]);
   const [newSymbol, setNewSymbol] = useState("");
   const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
+  const [approaching, setApproaching] = useState<ApproachingSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes, setRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes, setRes, appRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -163,6 +184,7 @@ export default function App() {
           fetch("/api/history").then((r) => r.json()),
           fetch("/api/watchlist").then((r) => r.json()),
           fetch("/api/settings").then((r) => r.json()),
+          fetch("/api/approaching").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value))
@@ -177,6 +199,8 @@ export default function App() {
         setWatchlistItems(wlRes.value);
       if (setRes.status === "fulfilled" && setRes.value && !setRes.value.error)
         setBotSettings(setRes.value);
+      if (appRes.status === "fulfilled" && Array.isArray(appRes.value))
+        setApproaching(appRes.value);
     } catch {
       // silent — dashboard will show stale data
     } finally {
@@ -357,6 +381,208 @@ export default function App() {
           />
         </div>
       </header>
+
+      {/* ==================== APPROACHING TRADES ==================== */}
+      {approaching.length > 0 && (
+        <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden mb-4">
+          <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+            <Target className="w-4 h-4 text-rose-400" />
+            <h2 className="font-semibold text-sm">Approaching Trades</h2>
+            <span className="text-xs text-gray-500 ml-1">
+              AD Fib targets
+            </span>
+            <span className="text-xs text-gray-500 ml-auto">
+              {approaching.filter((s) => s.distancePct < 5).length} imminent · {approaching.length} tracking
+            </span>
+          </div>
+          <div className="max-h-[700px] overflow-y-auto divide-y divide-gray-800/50">
+            {approaching.map((s, i) => {
+              const isLong = s.direction === "long";
+              const riskPct = s.projectedD > 0
+                ? (Math.abs(s.projectedD - s.sl) / s.projectedD) * 100
+                : 0;
+              const tp1Pct = s.projectedD > 0
+                ? (Math.abs(s.tp1 - s.projectedD) / s.projectedD) * 100
+                : 0;
+              const tp2Pct = s.projectedD > 0
+                ? (Math.abs(s.tp2 - s.projectedD) / s.projectedD) * 100
+                : 0;
+              const tp3Pct = s.tp3 != null && s.projectedD > 0
+                ? (Math.abs(s.tp3 - s.projectedD) / s.projectedD) * 100
+                : 0;
+              const rr = riskPct > 0 ? (tp2Pct / riskPct).toFixed(1) : "—";
+              const urgency =
+                s.distancePct < 2 ? "IMMINENT" :
+                s.distancePct < 5 ? "CLOSE" :
+                s.distancePct < 10 ? "APPROACHING" : "WATCHING";
+              const urgencyColor =
+                s.distancePct < 2 ? "text-rose-400" :
+                s.distancePct < 5 ? "text-orange-400" :
+                s.distancePct < 10 ? "text-yellow-400" : "text-emerald-400";
+              const progressPct = s.c != null
+                ? Math.min((Math.abs(s.currentPrice - s.c) / Math.abs(s.c - s.projectedD)) * 100, 100)
+                : 0;
+              const barColor =
+                s.distancePct < 2 ? "bg-rose-400" :
+                s.distancePct < 5 ? "bg-orange-400" :
+                s.distancePct < 10 ? "bg-yellow-400" : "bg-emerald-400";
+              const tvInterval = s.timeframe === "1D" ? "D" : "240";
+              const tvSymbol = s.symbol.replace("/", "");
+              return (
+                <div
+                  key={s.id}
+                  className={`px-4 py-3 hover:bg-gray-800/40 ${i === 0 && s.distancePct < 5 ? "bg-rose-500/5" : ""}`}
+                >
+                  {/* Row 1: Symbol + badges + urgency */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`inline-block w-2 h-2 rounded-full ${isLong ? "bg-emerald-400" : "bg-red-400"}`}
+                      />
+                      <span className="font-semibold">{s.symbol}</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                        {s.pattern} · {s.timeframe}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                          isLong ? "bg-emerald-400/10 text-emerald-400" : "bg-red-400/10 text-red-400"
+                        }`}
+                      >
+                        {s.direction}
+                      </span>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`text-[10px] font-bold uppercase tracking-wide ${urgencyColor}`}>
+                        {urgency}
+                      </span>
+                      <div className={`text-lg font-bold font-mono ${urgencyColor}`}>
+                        {s.distancePct.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                  {/* Row 2: Progress bar C → D */}
+                  <div className="mb-3">
+                    <div className="flex justify-between text-[10px] text-gray-500 font-mono mb-1">
+                      <span>C: {formatUsd(s.c ?? 0)}</span>
+                      <span className={urgencyColor}>Now: {formatUsd(s.currentPrice)}</span>
+                      <span>D: {formatUsd(s.projectedD)}</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${barColor} transition-all duration-700`}
+                        style={{ width: `${Math.min(progressPct, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  {/* Row 3: Profit target bars (AD Fib) */}
+                  <div className="bg-gray-800/30 rounded-lg px-3 py-2.5 mb-2">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[9px] font-bold text-gray-500 tracking-wide uppercase">
+                        Profit Targets (AD Fib)
+                      </span>
+                      <span className="text-[10px] font-bold text-yellow-400 font-mono">R:R {rr}</span>
+                    </div>
+                    {/* TP1 bar */}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[9px] text-gray-500 font-mono w-7 text-right">TP1</span>
+                      <span className="text-[9px] text-gray-600 font-mono w-8">.382</span>
+                      <div className="flex-1 h-3 rounded bg-gray-800/60 overflow-hidden relative">
+                        <div
+                          className="h-full rounded bg-emerald-400/30"
+                          style={{ width: `${Math.min(tp1Pct * 3, 100)}%` }}
+                        />
+                        <span className="absolute right-1.5 top-0 bottom-0 flex items-center text-[10px] font-bold text-emerald-400 font-mono">
+                          +{tp1Pct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    {/* TP2 bar */}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[9px] text-gray-500 font-mono w-7 text-right">TP2</span>
+                      <span className="text-[9px] text-gray-600 font-mono w-8">.618</span>
+                      <div className="flex-1 h-3 rounded bg-gray-800/60 overflow-hidden relative">
+                        <div
+                          className="h-full rounded bg-cyan-400/30"
+                          style={{ width: `${Math.min(tp2Pct * 3, 100)}%` }}
+                        />
+                        <span className="absolute right-1.5 top-0 bottom-0 flex items-center text-[10px] font-bold text-cyan-400 font-mono">
+                          +{tp2Pct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    {/* TP3 bar (if available) */}
+                    {s.tp3 != null && (
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[9px] text-gray-500 font-mono w-7 text-right">TP3</span>
+                        <span className="text-[9px] text-gray-600 font-mono w-8">1.00</span>
+                        <div className="flex-1 h-3 rounded bg-gray-800/60 overflow-hidden relative">
+                          <div
+                            className="h-full rounded bg-purple-400/30"
+                            style={{ width: `${Math.min(tp3Pct * 3, 100)}%` }}
+                          />
+                          <span className="absolute right-1.5 top-0 bottom-0 flex items-center text-[10px] font-bold text-purple-400 font-mono">
+                            +{tp3Pct.toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Risk bar */}
+                    <div className="flex items-center gap-2 pt-1 border-t border-gray-700/30 mt-1">
+                      <span className="text-[9px] text-gray-500 font-mono w-7 text-right">RISK</span>
+                      <span className="text-[9px] text-gray-600 font-mono w-8">SL</span>
+                      <div className="flex-1 h-3 rounded bg-gray-800/60 overflow-hidden relative">
+                        <div
+                          className="h-full rounded bg-red-400/20"
+                          style={{ width: `${Math.min(riskPct * 3, 100)}%` }}
+                        />
+                        <span className="absolute right-1.5 top-0 bottom-0 flex items-center text-[10px] font-bold text-red-400 font-mono">
+                          -{riskPct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Row 4: Price levels grid */}
+                  <div className="grid grid-cols-5 gap-1 text-center mb-2">
+                    {[
+                      { label: "ENTRY", val: s.projectedD, cls: "text-gray-200" },
+                      { label: "SL", val: s.sl, cls: "text-red-400" },
+                      { label: "TP1", val: s.tp1, cls: "text-emerald-400" },
+                      { label: "TP2", val: s.tp2, cls: "text-cyan-400" },
+                      { label: "TP3\u2192A", val: s.tp3, cls: "text-purple-400" },
+                    ].map((item) => (
+                      <div key={item.label}>
+                        <div className="text-[8px] text-gray-500 font-semibold tracking-wide">{item.label}</div>
+                        <div className={`text-[11px] font-bold font-mono ${item.cls}`}>
+                          {item.val != null ? formatUsd(item.val) : "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Row 5: XABC + TradingView */}
+                  <div className="flex items-center justify-between">
+                    {s.x != null && (
+                      <div className="text-[10px] text-gray-600 font-mono flex gap-2">
+                        <span>X={formatUsd(s.x)}</span>
+                        <span>A={formatUsd(s.a!)}</span>
+                        <span>B={formatUsd(s.b!)}</span>
+                        <span>C={formatUsd(s.c!)}</span>
+                      </div>
+                    )}
+                    <a
+                      href={`https://www.tradingview.com/chart/?symbol=${tvSymbol}&interval=${tvInterval}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-semibold tracking-wide text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      CHART ↗
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* ==================== BODY ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">

@@ -257,13 +257,15 @@ export function detectHarmonics(
       }
 
       // ---- Calculate TP and SL (Anti-NULL Rule: CLAUDE.md Rule #2) ----
-      // TP uses Fibonacci retracement of the AD leg from D.
-      // This gives meaningful targets regardless of how tight C→D is.
+      // TP uses Fibonacci retracement of the AD leg from D (Carney method).
       //   TP1 = 0.382 retracement of AD from D
       //   TP2 = 0.618 retracement of AD from D
-      // SL = 13% of XA extended beyond D (against the trade direction).
+      // SL per Carney: beyond X for retracement patterns (Gartley/Bat/Alt Bat),
+      //                beyond D for extension patterns (Butterfly/ABCD).
       const adRange = Math.abs(A.price - projectedD);
       const xaRange = Math.abs(A.price - X.price);
+      const isExtension = pattern.name === "Butterfly" || pattern.name === "ABCD";
+      const slBuffer = xaRange * 0.05; // 5% of XA range as breathing room
       let tp1Price: number;
       let tp2Price: number;
       let stopLossPrice: number;
@@ -272,12 +274,14 @@ export function detectHarmonics(
         // Long: D is a low, we expect price to rise toward A
         tp1Price = projectedD + adRange * 0.382;
         tp2Price = projectedD + adRange * 0.618;
-        stopLossPrice = projectedD - xaRange * 0.13;
+        // Extension: D is below X, SL below D. Retracement: D near X, SL below X.
+        stopLossPrice = isExtension ? projectedD - slBuffer : X.price - slBuffer;
       } else {
         // Short: D is a high, we expect price to fall toward A
         tp1Price = projectedD - adRange * 0.382;
         tp2Price = projectedD - adRange * 0.618;
-        stopLossPrice = projectedD + xaRange * 0.13;
+        // Extension: D is above X, SL above D. Retracement: D near X, SL above X.
+        stopLossPrice = isExtension ? projectedD + slBuffer : X.price + slBuffer;
       }
 
       // Validate all exits are positive — skip if math produces bad values
@@ -413,9 +417,11 @@ export function detectCompletedPatterns(
         continue;
       }
 
-      // ---- Calculate TP and SL (same logic as forming patterns) ----
+      // ---- Calculate TP and SL (same Carney logic as forming patterns) ----
       const adRange = Math.abs(A.price - D.price);
       const xaRange = Math.abs(A.price - X.price);
+      const isExtension = pattern.name === "Butterfly" || pattern.name === "ABCD";
+      const slBuffer = xaRange * 0.05;
       let tp1Price: number;
       let tp2Price: number;
       let stopLossPrice: number;
@@ -423,11 +429,11 @@ export function detectCompletedPatterns(
       if (direction === "long") {
         tp1Price = D.price + adRange * 0.382;
         tp2Price = D.price + adRange * 0.618;
-        stopLossPrice = D.price - xaRange * 0.13;
+        stopLossPrice = isExtension ? D.price - slBuffer : X.price - slBuffer;
       } else {
         tp1Price = D.price - adRange * 0.382;
         tp2Price = D.price - adRange * 0.618;
-        stopLossPrice = D.price + xaRange * 0.13;
+        stopLossPrice = isExtension ? D.price + slBuffer : X.price + slBuffer;
       }
 
       if (tp1Price <= 0 || tp2Price <= 0 || stopLossPrice <= 0) {
