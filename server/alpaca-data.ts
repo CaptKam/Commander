@@ -151,7 +151,7 @@ function getDateRange(timeframe: "1D" | "4H"): { start: string; end: string } {
   if (timeframe === "1D") {
     start.setDate(start.getDate() - 365); // 1 year — deep pivot history
   } else {
-    start.setDate(start.getDate() - 90);  // 3 months of 4H candles
+    start.setDate(start.getDate() - 60);  // 60 days of 4H candles (reduced from 90 to fit within page limit)
   }
   return {
     start: start.toISOString(),
@@ -187,9 +187,9 @@ function barToCandle(bar: AlpacaBar): Candle {
 // Alpaca's limit is shared across ALL symbols in a multi-symbol
 // request. With 12 stocks × 540 4H candles = 6480 bars, the
 // first page gets truncated. Must follow next_page_token.
-// Max 10 pages to prevent runaway loops on free tier.
+// Max 15 pages to prevent runaway loops on free tier.
 // ============================================================
-const MAX_PAGES = 10;
+const MAX_PAGES = 15;
 
 function appendBars(
   results: Map<string, AlpacaBar[]>,
