@@ -291,18 +291,26 @@ export function detectHarmonics(
 
       // Hard guard: TP/SL must be on the correct side of entry
       if (direction === "long") {
-        if (tp1Price <= projectedD || tp2Price <= projectedD || stopLossPrice >= projectedD) {
+        const issues: string[] = [];
+        if (tp1Price <= projectedD) issues.push(`TP1 $${tp1Price.toFixed(2)} <= entry`);
+        if (tp2Price <= projectedD) issues.push(`TP2 $${tp2Price.toFixed(2)} <= entry`);
+        if (stopLossPrice >= projectedD) issues.push(`SL $${stopLossPrice.toFixed(2)} >= entry (should be below)`);
+        if (issues.length > 0) {
           console.error(
-            `[CRITICAL] Inverted TP/SL for LONG ${symbol} ${pattern.name} ${timeframe}: ` +
-              `entry=$${projectedD.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+            `[CRITICAL] Bad exits for LONG ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${projectedD.toFixed(2)} — ${issues.join("; ")} — SKIPPING`,
           );
           continue;
         }
       } else {
-        if (tp1Price >= projectedD || tp2Price >= projectedD || stopLossPrice <= projectedD) {
+        const issues: string[] = [];
+        if (tp1Price >= projectedD) issues.push(`TP1 $${tp1Price.toFixed(2)} >= entry`);
+        if (tp2Price >= projectedD) issues.push(`TP2 $${tp2Price.toFixed(2)} >= entry`);
+        if (stopLossPrice <= projectedD) issues.push(`SL $${stopLossPrice.toFixed(2)} <= entry (should be above)`);
+        if (issues.length > 0) {
           console.error(
-            `[CRITICAL] Inverted TP/SL for SHORT ${symbol} ${pattern.name} ${timeframe}: ` +
-              `entry=$${projectedD.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+            `[CRITICAL] Bad exits for SHORT ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${projectedD.toFixed(2)} — ${issues.join("; ")} — SKIPPING`,
           );
           continue;
         }
@@ -442,18 +450,26 @@ export function detectCompletedPatterns(
 
       // Hard guard: TP/SL must be on the correct side of entry
       if (direction === "long") {
-        if (tp1Price <= D.price || tp2Price <= D.price || stopLossPrice >= D.price) {
+        const issues: string[] = [];
+        if (tp1Price <= D.price) issues.push(`TP1 $${tp1Price.toFixed(2)} <= entry`);
+        if (tp2Price <= D.price) issues.push(`TP2 $${tp2Price.toFixed(2)} <= entry`);
+        if (stopLossPrice >= D.price) issues.push(`SL $${stopLossPrice.toFixed(2)} >= entry (should be below)`);
+        if (issues.length > 0) {
           console.error(
-            `[CRITICAL] Inverted TP/SL for LONG ${symbol} ${pattern.name} ${timeframe}: ` +
-              `entry=$${D.price.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+            `[CRITICAL] Bad exits for LONG ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${D.price.toFixed(2)} — ${issues.join("; ")} — SKIPPING`,
           );
           continue;
         }
       } else {
-        if (tp1Price >= D.price || tp2Price >= D.price || stopLossPrice <= D.price) {
+        const issues: string[] = [];
+        if (tp1Price >= D.price) issues.push(`TP1 $${tp1Price.toFixed(2)} >= entry`);
+        if (tp2Price >= D.price) issues.push(`TP2 $${tp2Price.toFixed(2)} >= entry`);
+        if (stopLossPrice <= D.price) issues.push(`SL $${stopLossPrice.toFixed(2)} <= entry (should be above)`);
+        if (issues.length > 0) {
           console.error(
-            `[CRITICAL] Inverted TP/SL for SHORT ${symbol} ${pattern.name} ${timeframe}: ` +
-              `entry=$${D.price.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)} SL=$${stopLossPrice.toFixed(2)} — SKIPPING`,
+            `[CRITICAL] Bad exits for SHORT ${symbol} ${pattern.name} ${timeframe}: ` +
+              `entry=$${D.price.toFixed(2)} — ${issues.join("; ")} — SKIPPING`,
           );
           continue;
         }

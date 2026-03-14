@@ -69,11 +69,11 @@ const INITIAL_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
-// SIP-specific backoff steps: 2s, 5s, 10s, 30s, 60s
-const SIP_BACKOFF_STEPS = [2_000, 5_000, 10_000, 30_000, 60_000];
-const SIP_MAX_CONSECUTIVE_FAILURES = 5;
+// Shared backoff steps: 2s, 5s, 10s, 30s, 60s
+const BACKOFF_STEPS = [2_000, 5_000, 10_000, 30_000, 60_000];
+const MAX_CONSECUTIVE_FAILURES = 5;
 // If a connection survives this long, reset the failure counter
-const SIP_STABLE_CONNECTION_MS = 30_000;
+const STABLE_CONNECTION_MS = 30_000;
 
 // SIP market hours check interval (check every 5 minutes when suspended)
 const SIP_MARKET_CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -96,6 +96,14 @@ let sipSuspended = false;
 let sipMarketCheckTimer: ReturnType<typeof setInterval> | null = null;
 let sipReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let sipConnectionOpenedAt = 0;
+
+// Crypto-specific state
+let cryptoConsecutiveFailures = 0;
+let cryptoSuspended = false;
+let cryptoReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let cryptoConnectionOpenedAt = 0;
+// Crypto resumes after suspension cooldown (5 min) instead of market hours
+const CRYPTO_SUSPEND_COOLDOWN_MS = 5 * 60 * 1000;
 
 // ============================================================
 // SIP Market Hours — Mon-Fri 4:00 AM to 8:00 PM Eastern
@@ -166,37 +174,45 @@ function createStream(
     return;
   }
 
-  // --- SIP-specific guards ---
   const isSip = label === "Stock/SIP";
+  const isCrypto = label === "Crypto";
 
+  // --- SIP-specific guards ---
   if (isSip) {
-    // Don't connect if market is closed
     if (!isSipMarketHours()) {
       console.log(`[WebSocket] ${label}: market closed — skipping connection. Will retry at next market open.`);
       scheduleSipMarketCheck();
       return;
     }
-
-    // Don't connect if suspended after too many failures
     if (sipSuspended) {
       console.log(`[WebSocket] ${label}: reconnect suspended — waiting for next market open`);
       scheduleSipMarketCheck();
       return;
     }
-
-    // Cleanup: close any existing SIP connection before opening a new one
-    const existingWs = getWs();
-    if (existingWs) {
-      console.log(`[WebSocket] ${label}: closing existing connection before reconnect`);
-      forceCloseWs(existingWs);
-      setWs(null);
-    }
-
-    // Clear any pending reconnect timer
     if (sipReconnectTimer) {
       clearTimeout(sipReconnectTimer);
       sipReconnectTimer = null;
     }
+  }
+
+  // --- Crypto-specific guards ---
+  if (isCrypto) {
+    if (cryptoSuspended) {
+      console.log(`[WebSocket] ${label}: reconnect suspended — will retry in ${CRYPTO_SUSPEND_COOLDOWN_MS / 1000}s`);
+      return;
+    }
+    if (cryptoReconnectTimer) {
+      clearTimeout(cryptoReconnectTimer);
+      cryptoReconnectTimer = null;
+    }
+  }
+
+  // --- Cleanup existing connection before opening new one (both streams) ---
+  const existingWs = getWs();
+  if (existingWs) {
+    console.log(`[WebSocket] ${label}: closing existing connection before reconnect`);
+    forceCloseWs(existingWs);
+    setWs(null);
   }
 
   const { key, secret } = getAlpacaKeys();
@@ -211,6 +227,9 @@ function createStream(
 
     if (isSip) {
       sipConnectionOpenedAt = Date.now();
+    }
+    if (isCrypto) {
+      cryptoConnectionOpenedAt = Date.now();
     }
 
     // Authenticate
@@ -267,7 +286,7 @@ function createStream(
     if (isSip) {
       // Check if this connection was stable (survived > 30s)
       const connectionDuration = Date.now() - sipConnectionOpenedAt;
-      if (sipConnectionOpenedAt > 0 && connectionDuration > SIP_STABLE_CONNECTION_MS) {
+      if (sipConnectionOpenedAt > 0 && connectionDuration > STABLE_CONNECTION_MS) {
         sipConsecutiveFailures = 0;
       } else {
         sipConsecutiveFailures++;
@@ -281,7 +300,7 @@ function createStream(
       }
 
       // If too many consecutive failures, suspend
-      if (sipConsecutiveFailures >= SIP_MAX_CONSECUTIVE_FAILURES) {
+      if (sipConsecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         sipSuspended = true;
         console.error(
           `[WebSocket] SIP reconnect suspended — ${sipConsecutiveFailures} consecutive failures. ` +
@@ -292,30 +311,56 @@ function createStream(
       }
 
       // Exponential backoff: 2s, 5s, 10s, 30s, 60s
-      const backoffIdx = Math.min(sipConsecutiveFailures, SIP_BACKOFF_STEPS.length - 1);
-      const delayMs = SIP_BACKOFF_STEPS[backoffIdx];
+      const backoffIdx = Math.min(sipConsecutiveFailures, BACKOFF_STEPS.length - 1);
+      const delayMs = BACKOFF_STEPS[backoffIdx];
 
       console.warn(
         `[WebSocket] ${label}: disconnected (code=${code} reason=${reason.toString()}) — ` +
-        `reconnecting in ${delayMs / 1000}s (failure ${sipConsecutiveFailures}/${SIP_MAX_CONSECUTIVE_FAILURES})`,
+        `reconnecting in ${delayMs / 1000}s (failure ${sipConsecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
       );
 
       sipReconnectTimer = setTimeout(() => {
         sipReconnectTimer = null;
         createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
       }, delayMs);
-    } else {
-      // Crypto — keep existing exponential backoff behavior
+    } else if (isCrypto) {
+      // Check if this connection was stable (survived > 30s)
+      const connectionDuration = Date.now() - cryptoConnectionOpenedAt;
+      if (cryptoConnectionOpenedAt > 0 && connectionDuration > STABLE_CONNECTION_MS) {
+        cryptoConsecutiveFailures = 0;
+      } else {
+        cryptoConsecutiveFailures++;
+      }
+
+      // If too many consecutive failures, suspend and schedule cooldown
+      if (cryptoConsecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        cryptoSuspended = true;
+        console.error(
+          `[WebSocket] Crypto reconnect suspended — ${cryptoConsecutiveFailures} consecutive failures. ` +
+          `Will retry in ${CRYPTO_SUSPEND_COOLDOWN_MS / 1000}s.`,
+        );
+        setTimeout(() => {
+          cryptoSuspended = false;
+          cryptoConsecutiveFailures = 0;
+          console.log("[WebSocket] Crypto: suspension cooldown expired — attempting connection");
+          createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
+        }, CRYPTO_SUSPEND_COOLDOWN_MS);
+        return;
+      }
+
+      // Exponential backoff: 2s, 5s, 10s, 30s, 60s
+      const backoffIdx = Math.min(cryptoConsecutiveFailures, BACKOFF_STEPS.length - 1);
+      const delayMs = BACKOFF_STEPS[backoffIdx];
+
       console.warn(
         `[WebSocket] ${label}: disconnected (code=${code} reason=${reason.toString()}) — ` +
-        `reconnecting in ${getReconnectMs() / 1000}s`,
+        `reconnecting in ${delayMs / 1000}s (failure ${cryptoConsecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
       );
 
-      setTimeout(() => {
-        const nextMs = Math.min(getReconnectMs() * 2, MAX_RECONNECT_MS);
-        setReconnectMs(nextMs);
+      cryptoReconnectTimer = setTimeout(() => {
+        cryptoReconnectTimer = null;
         createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
-      }, getReconnectMs());
+      }, delayMs);
     }
   });
 
@@ -432,7 +477,7 @@ export function startPriceStreams(watchlist: string[]): void {
  * Gracefully closes both WebSocket connections.
  */
 export function stopPriceStreams(): void {
-  // Clear SIP timers
+  // Clear all reconnect timers
   if (sipReconnectTimer) {
     clearTimeout(sipReconnectTimer);
     sipReconnectTimer = null;
@@ -440,6 +485,10 @@ export function stopPriceStreams(): void {
   if (sipMarketCheckTimer) {
     clearInterval(sipMarketCheckTimer);
     sipMarketCheckTimer = null;
+  }
+  if (cryptoReconnectTimer) {
+    clearTimeout(cryptoReconnectTimer);
+    cryptoReconnectTimer = null;
   }
 
   forceCloseWs(cryptoWs);
@@ -467,7 +516,7 @@ export function getStreamStatus(): { crypto: string; stock: string; priceCount: 
     }
   };
   return {
-    crypto: wsState(cryptoWs),
+    crypto: cryptoSuspended ? "suspended" : wsState(cryptoWs),
     stock: sipSuspended ? "suspended" : wsState(stockWs),
     priceCount: latestPrices.size,
   };
