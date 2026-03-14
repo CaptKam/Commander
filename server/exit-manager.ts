@@ -141,22 +141,31 @@ async function getPosition(symbol: string): Promise<AlpacaPosition | null> {
 }
 
 /**
- * Cancel all open orders for a symbol.
+ * Get all open orders for a symbol from Alpaca.
  */
-async function cancelAllOrdersForSymbol(symbol: string): Promise<void> {
+async function getOpenOrders(symbol: string): Promise<AlpacaOrder[]> {
   const { key, secret, base } = getAlpacaConfig();
   try {
     const res = await fetch(
       `${base}/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`,
       { headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret } },
     );
-    if (!res.ok) return;
-    const orders = (await res.json()) as AlpacaOrder[];
-    await Promise.all(orders.map((o) => cancelOrder(o.id)));
-    console.log(`[ExitManager] Cancelled ${orders.length} open orders for ${symbol}`);
+    if (!res.ok) return [];
+    return (await res.json()) as AlpacaOrder[];
   } catch (err) {
-    console.error(`[ExitManager] Failed to cancel orders for ${symbol}:`, err);
+    console.error(`[ExitManager] Failed to fetch open orders for ${symbol}:`, err);
+    return [];
   }
+}
+
+/**
+ * Cancel all open orders for a symbol.
+ */
+async function cancelAllOrdersForSymbol(symbol: string): Promise<void> {
+  const orders = await getOpenOrders(symbol);
+  if (orders.length === 0) return;
+  await Promise.all(orders.map((o) => cancelOrder(o.id)));
+  console.log(`[ExitManager] Cancelled ${orders.length} open orders for ${symbol}`);
 }
 
 async function cancelOrder(orderId: string): Promise<boolean> {
@@ -185,15 +194,21 @@ async function cancelOrder(orderId: string): Promise<boolean> {
 const MAX_EXIT_RETRIES = 3;
 
 // ============================================================
-// Exit order placement — TP1 + TP2 (limit only, split 50/50)
+// Exit order placement — Position-aware TP1 + TP2 (limit)
 //
-// SL is NOT placed as a separate order because Alpaca enforces
-// that total pending sell qty cannot exceed position size.
-// TP1 (50%) + TP2 (50%) = 100%, leaving no room for a separate SL.
-// Instead, SL is monitored software-side in the exit cycle (Phase 3).
+// Queries Alpaca for the ACTUAL position size and existing open
+// orders, then calculates the exact quantities that are available.
 //
-// Quantity split uses floor() for TP1, remainder for TP2, so
-// TP1 + TP2 = exactly filledQty with zero rounding overflow.
+// If no exit orders exist:
+//   TP1 = floor(positionQty × 0.5 × 10^6) / 10^6
+//   TP2 = positionQty - TP1
+//   Guarantees TP1 + TP2 = exactly positionQty, zero overflow.
+//
+// If one exit order already exists:
+//   Second exit = positionQty - alreadyOrderedQty
+//   Handles rounding/fee differences from first exit.
+//
+// SL is monitored software-side in Phase 3 (not a separate order).
 // ============================================================
 async function placeExitOrders(signal: {
   id: number;
@@ -202,61 +217,128 @@ async function placeExitOrders(signal: {
   tp1Price: string;
   tp2Price: string;
   stopLossPrice: string;
-  filledQty: string;
-}): Promise<{ tp1Id: string; tp2Id: string }> {
+}): Promise<{ tp1Id: string | null; tp2Id: string | null; positionQty: string }> {
   const isCrypto = signal.symbol.includes("/");
-  const totalQty = Number(signal.filledQty);
-
-  // Floor-based split: TP1 gets floor(50%), TP2 gets the remainder.
-  // This guarantees TP1 + TP2 = totalQty exactly, no overflow.
-  const tp1Qty = isCrypto
-    ? Math.floor(totalQty * 0.5 * 1e9) / 1e9   // floor to 9 decimals (crypto max)
-    : Math.floor(totalQty * 0.5);                // whole shares for equities
-  const tp2Qty = isCrypto
-    ? Math.round((totalQty - tp1Qty) * 1e9) / 1e9
-    : totalQty - tp1Qty;
-
-  // Exit side is opposite of entry
   const exitSide = signal.direction === "long" ? "sell" : "buy";
 
+  // Step 1: Query ACTUAL Alpaca position — this is the only source of truth
+  const position = await getPosition(signal.symbol);
+  if (!position || Number(position.qty) <= 0) {
+    throw new Error(`No Alpaca position for ${signal.symbol} — cannot place exits`);
+  }
+  const positionQty = Number(position.qty);
+
+  // Step 2: Check existing open orders to find already-locked qty
+  const openOrders = await getOpenOrders(signal.symbol);
+  const exitOrders = openOrders.filter((o) => o.side === exitSide);
+  const alreadyOrderedQty = exitOrders.reduce((sum, o) => sum + Number(o.qty), 0);
+
+  console.log(
+    `[ExitManager] ${signal.symbol} #${signal.id}: position=${positionQty}, ` +
+    `already ordered=${alreadyOrderedQty} (${exitOrders.length} open exit orders)`,
+  );
+
+  const availableQty = positionQty - alreadyOrderedQty;
+
+  // If both exits already exist, nothing to do
+  if (exitOrders.length >= 2) {
+    console.log(`[ExitManager] ${signal.symbol} #${signal.id}: 2 exit orders already exist`);
+    return {
+      tp1Id: exitOrders[0]?.id ?? null,
+      tp2Id: exitOrders[1]?.id ?? null,
+      positionQty: String(positionQty),
+    };
+  }
+
   // Anti-422 formatting (CLAUDE.md Rule #1)
-  const safeTp1Qty = formatAlpacaQty(tp1Qty, isCrypto);
-  const safeTp2Qty = formatAlpacaQty(tp2Qty, isCrypto);
   const safeTp1Price = formatAlpacaPrice(Number(signal.tp1Price), isCrypto);
   const safeTp2Price = formatAlpacaPrice(Number(signal.tp2Price), isCrypto);
+
+  // Case A: One exit order already exists — place ONLY the second
+  if (exitOrders.length === 1) {
+    if (availableQty <= 0) {
+      throw new Error(
+        `${signal.symbol}: position=${positionQty} but ${alreadyOrderedQty} already ordered — ` +
+        `no qty available for second exit`,
+      );
+    }
+    const safeQty = formatAlpacaQty(availableQty, isCrypto);
+    console.log(
+      `[ExitManager] Placing SECOND exit for ${signal.symbol} #${signal.id}: ` +
+      `qty=${safeQty} (available=${availableQty}, position=${positionQty}, locked=${alreadyOrderedQty})`,
+    );
+
+    const secondOrder = await placeOrder({
+      symbol: signal.symbol,
+      qty: String(safeQty),
+      side: exitSide,
+      type: "limit",
+      time_in_force: "gtc",
+      limit_price: String(safeTp2Price),
+    });
+
+    return {
+      tp1Id: exitOrders[0].id,
+      tp2Id: secondOrder.id,
+      positionQty: String(positionQty),
+    };
+  }
+
+  // Case B: No exit orders — fresh split
+  // Floor to 6 decimal places for crypto (safer than 9 — avoids fee/rounding edge cases)
+  const tp1Qty = isCrypto
+    ? Math.floor(positionQty * 0.5 * 1e6) / 1e6
+    : Math.floor(positionQty * 0.5);
+  const tp2Qty = isCrypto
+    ? Math.floor((positionQty - tp1Qty) * 1e6) / 1e6
+    : positionQty - tp1Qty;
+
+  const safeTp1Qty = formatAlpacaQty(tp1Qty, isCrypto);
+  const safeTp2Qty = formatAlpacaQty(tp2Qty, isCrypto);
 
   console.log(
     `[ExitManager] Placing exit orders for ${signal.symbol} #${signal.id}: ` +
     `TP1=${safeTp1Price} (qty ${safeTp1Qty}), TP2=${safeTp2Price} (qty ${safeTp2Qty}), ` +
-    `SL=${formatAlpacaPrice(Number(signal.stopLossPrice), isCrypto)} (software-monitored)`,
+    `total=${safeTp1Qty + safeTp2Qty} of ${positionQty}`,
   );
 
-  // Place TP1 + TP2 as limit orders (50/50 split = 100% of position)
-  const [tp1Order, tp2Order] = await Promise.all([
-    placeOrder({
-      symbol: signal.symbol,
-      qty: String(safeTp1Qty),
-      side: exitSide,
-      type: "limit",
-      time_in_force: "gtc",
-      limit_price: String(safeTp1Price),
-    }),
-    placeOrder({
+  // Place TP1 first, then TP2 sequentially.
+  // If TP1 succeeds but TP2 fails, next cycle will detect 1 existing order
+  // and place only the second using remaining available qty.
+  const tp1Order = await placeOrder({
+    symbol: signal.symbol,
+    qty: String(safeTp1Qty),
+    side: exitSide,
+    type: "limit",
+    time_in_force: "gtc",
+    limit_price: String(safeTp1Price),
+  });
+
+  let tp2Order: AlpacaOrder;
+  try {
+    tp2Order = await placeOrder({
       symbol: signal.symbol,
       qty: String(safeTp2Qty),
       side: exitSide,
       type: "limit",
       time_in_force: "gtc",
       limit_price: String(safeTp2Price),
-    }),
-  ]);
+    });
+  } catch (err) {
+    // TP1 succeeded but TP2 failed — don't throw, return what we have.
+    // Next cycle will detect 1 existing order and place the remainder.
+    console.warn(
+      `[ExitManager] TP1 placed (${tp1Order.id}) but TP2 failed for ${signal.symbol} #${signal.id}: ${err}`,
+    );
+    return { tp1Id: tp1Order.id, tp2Id: null, positionQty: String(positionQty) };
+  }
 
   console.log(
     `[ExitManager] Exit orders placed for ${signal.symbol}: ` +
     `TP1=${tp1Order.id}, TP2=${tp2Order.id}`,
   );
 
-  return { tp1Id: tp1Order.id, tp2Id: tp2Order.id };
+  return { tp1Id: tp1Order.id, tp2Id: tp2Order.id, positionQty: String(positionQty) };
 }
 
 // ============================================================
@@ -330,25 +412,7 @@ export async function runExitCycle(): Promise<void> {
         );
 
         try {
-          // Query ACTUAL Alpaca position to get real qty held.
-          // This is the source of truth — not the order's filled_qty,
-          // which can differ due to partial fills or rounding.
-          const position = await getPosition(signal.symbol);
-          const actualQty = position ? position.qty : order.filled_qty;
-
-          if (!position) {
-            console.warn(
-              `[ExitManager] No Alpaca position found for ${signal.symbol} — ` +
-              `falling back to order filled_qty=${order.filled_qty}`,
-            );
-          } else {
-            console.log(
-              `[ExitManager] Alpaca position for ${signal.symbol}: qty=${position.qty} ` +
-              `(order filled_qty=${order.filled_qty})`,
-            );
-          }
-
-          // Place TP1 + TP2 limit exit orders (SL monitored in software)
+          // Place exit orders — queries Alpaca position + open orders internally
           const exits = await placeExitOrders({
             id: signal.id,
             symbol: signal.symbol,
@@ -356,18 +420,18 @@ export async function runExitCycle(): Promise<void> {
             tp1Price: signal.tp1Price,
             tp2Price: signal.tp2Price,
             stopLossPrice: signal.stopLossPrice,
-            filledQty: actualQty,
           });
 
           // Persist to DB (CLAUDE.md Rule #2 — never in-memory only)
           await db
             .update(liveSignals)
             .set({
-              status: "filled",
-              filledQty: actualQty,
+              status: exits.tp1Id && exits.tp2Id ? "filled" : "pending",
+              filledQty: exits.positionQty,
               filledAvgPrice: order.filled_avg_price,
               tp1OrderId: exits.tp1Id,
               tp2OrderId: exits.tp2Id,
+              exitRetries: 0,
               executedAt: new Date(),
             })
             .where(eq(liveSignals.id, signal.id));
@@ -382,30 +446,24 @@ export async function runExitCycle(): Promise<void> {
           if (retries >= MAX_EXIT_RETRIES) {
             // Stop retrying — mark as exit_failed and alert
             console.warn(
-              `[Exit] ${signal.symbol} exit order failed ${MAX_EXIT_RETRIES}x — manual intervention needed`,
+              `[Exit] ${signal.symbol} exit failed ${MAX_EXIT_RETRIES}x — manual review needed`,
             );
             await db
               .update(liveSignals)
               .set({
                 status: "exit_failed",
-                filledQty: order.filled_qty,
-                filledAvgPrice: order.filled_avg_price,
                 exitRetries: retries,
               })
               .where(eq(liveSignals.id, signal.id));
             sendError(
-              `${signal.symbol} exit order failed ${MAX_EXIT_RETRIES}x — manual intervention needed`,
+              `${signal.symbol} exit failed ${MAX_EXIT_RETRIES}x — manual review needed`,
               err,
             ).catch(() => {});
           } else {
             // Increment retry counter, stay pending for next cycle
             await db
               .update(liveSignals)
-              .set({
-                exitRetries: retries,
-                filledQty: order.filled_qty,
-                filledAvgPrice: order.filled_avg_price,
-              })
+              .set({ exitRetries: retries })
               .where(eq(liveSignals.id, signal.id));
           }
         }
@@ -501,29 +559,22 @@ export async function runExitCycle(): Promise<void> {
 
       try {
         const isCrypto = signal.symbol.includes("/");
-        const totalQty = Number(signal.filledQty);
         const exitSide = signal.direction === "long" ? "sell" : "buy";
 
-        // Determine remaining qty based on which TPs have filled
-        // Uses same floor-based split as placeExitOrders for consistency
-        let remainingQty = totalQty;
-        if (signal.tp1OrderId) {
-          const tp1 = await getOrder(signal.tp1OrderId);
-          if (tp1?.status === "filled") {
-            const tp1Qty = isCrypto
-              ? Math.floor(totalQty * 0.5 * 1e9) / 1e9
-              : Math.floor(totalQty * 0.5);
-            remainingQty = isCrypto
-              ? Math.round((totalQty - tp1Qty) * 1e9) / 1e9
-              : totalQty - tp1Qty;
-          }
-        }
+        // Cancel any outstanding TP orders FIRST
+        await cancelAllOrdersForSymbol(signal.symbol);
 
-        // Cancel any outstanding TP orders before market exit
-        const cancels: Promise<boolean>[] = [];
-        if (signal.tp1OrderId) cancels.push(cancelOrder(signal.tp1OrderId));
-        if (signal.tp2OrderId) cancels.push(cancelOrder(signal.tp2OrderId));
-        await Promise.all(cancels);
+        // Query actual remaining position from Alpaca — the only source of truth
+        const position = await getPosition(signal.symbol);
+        const remainingQty = position ? Number(position.qty) : 0;
+        if (remainingQty <= 0) {
+          console.log(`[ExitManager] ${signal.symbol} #${signal.id}: no position left after SL check`);
+          await db
+            .update(liveSignals)
+            .set({ status: "closed" })
+            .where(eq(liveSignals.id, signal.id));
+          continue;
+        }
 
         // Market sell remaining position
         const slOrder = await placeMarketExit(signal.symbol, remainingQty, exitSide, isCrypto);
@@ -577,7 +628,6 @@ export async function fixStuckExits(signalId: number): Promise<string> {
   // Step 2: Query actual Alpaca position
   const position = await getPosition(signal.symbol);
   if (!position || Number(position.qty) <= 0) {
-    // No position — mark as closed
     await db
       .update(liveSignals)
       .set({ status: "closed" })
@@ -585,12 +635,11 @@ export async function fixStuckExits(signalId: number): Promise<string> {
     return `${signal.symbol} #${signalId}: no Alpaca position found — marked closed`;
   }
 
-  const actualQty = position.qty;
   console.log(
-    `[ExitManager] Fix stuck: ${signal.symbol} #${signalId} actual position qty=${actualQty}`,
+    `[ExitManager] Fix stuck: ${signal.symbol} #${signalId} position qty=${position.qty}`,
   );
 
-  // Step 3: Place fresh exit orders using actual position qty
+  // Step 3: Place fresh exit orders (position-aware — queries position internally)
   try {
     const exits = await placeExitOrders({
       id: signal.id,
@@ -599,15 +648,14 @@ export async function fixStuckExits(signalId: number): Promise<string> {
       tp1Price: signal.tp1Price,
       tp2Price: signal.tp2Price,
       stopLossPrice: signal.stopLossPrice,
-      filledQty: actualQty,
     });
 
     // Step 4: Update DB
     await db
       .update(liveSignals)
       .set({
-        status: "filled",
-        filledQty: actualQty,
+        status: exits.tp1Id && exits.tp2Id ? "filled" : "pending",
+        filledQty: exits.positionQty,
         tp1OrderId: exits.tp1Id,
         tp2OrderId: exits.tp2Id,
         exitRetries: 0,
@@ -616,7 +664,7 @@ export async function fixStuckExits(signalId: number): Promise<string> {
       .where(eq(liveSignals.id, signalId));
 
     return (
-      `${signal.symbol} #${signalId}: fixed — position qty=${actualQty}, ` +
+      `${signal.symbol} #${signalId}: fixed — position qty=${exits.positionQty}, ` +
       `TP1=${exits.tp1Id}, TP2=${exits.tp2Id}`
     );
   } catch (err) {
