@@ -92,6 +92,25 @@ interface ClosedTrade {
   tp2: number | null;
 }
 
+interface ApproachingSignal {
+  id: number;
+  symbol: string;
+  pattern: string;
+  direction: string;
+  timeframe: string;
+  projectedD: number;
+  currentPrice: number;
+  sl: number;
+  tp1: number;
+  tp2: number;
+  x: number | null;
+  a: number | null;
+  b: number | null;
+  c: number | null;
+  distancePct: number;
+  createdAt: string;
+}
+
 interface WatchlistEntry {
   symbol: string;
   assetClass: string;
@@ -148,12 +167,13 @@ export default function App() {
   const [watchlistItems, setWatchlistItems] = useState<WatchlistEntry[]>([]);
   const [newSymbol, setNewSymbol] = useState("");
   const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
+  const [approaching, setApproaching] = useState<ApproachingSignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes, setRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, histRes, wlRes, setRes, appRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -163,6 +183,7 @@ export default function App() {
           fetch("/api/history").then((r) => r.json()),
           fetch("/api/watchlist").then((r) => r.json()),
           fetch("/api/settings").then((r) => r.json()),
+          fetch("/api/approaching").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value))
@@ -177,6 +198,8 @@ export default function App() {
         setWatchlistItems(wlRes.value);
       if (setRes.status === "fulfilled" && setRes.value && !setRes.value.error)
         setBotSettings(setRes.value);
+      if (appRes.status === "fulfilled" && Array.isArray(appRes.value))
+        setApproaching(appRes.value);
     } catch {
       // silent — dashboard will show stale data
     } finally {
@@ -357,6 +380,148 @@ export default function App() {
           />
         </div>
       </header>
+
+      {/* ==================== APPROACHING TRADES ==================== */}
+      {approaching.length > 0 && (
+        <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden mb-4">
+          <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
+            <Target className="w-4 h-4 text-rose-400" />
+            <h2 className="font-semibold text-sm">Approaching Trades</h2>
+            <span className="text-xs text-gray-500 ml-auto">
+              {approaching.length} signal{approaching.length !== 1 ? "s" : ""} within 25%
+            </span>
+          </div>
+          <div className="max-h-[600px] overflow-y-auto divide-y divide-gray-800/50">
+            {approaching.map((s, i) => {
+              const isLong = s.direction === "long";
+              const isCryptoShort = !isLong && s.symbol.includes("/");
+              const canExecute = isLong || !s.symbol.includes("/");
+              const riskAmt = Math.abs(s.projectedD - s.sl);
+              const rewardAmt = Math.abs(s.projectedD - s.tp2);
+              const rr = riskAmt > 0 ? (rewardAmt / riskAmt).toFixed(1) : "—";
+              const urgency =
+                s.distancePct < 2 ? "IMMINENT" :
+                s.distancePct < 5 ? "CLOSE" :
+                s.distancePct < 10 ? "APPROACHING" : "WATCHING";
+              const urgencyColor =
+                s.distancePct < 2 ? "text-rose-400" :
+                s.distancePct < 5 ? "text-orange-400" :
+                s.distancePct < 10 ? "text-yellow-400" : "text-emerald-400";
+              const urgencyBg =
+                s.distancePct < 2 ? "bg-rose-400/10" :
+                s.distancePct < 5 ? "bg-orange-400/10" :
+                s.distancePct < 10 ? "bg-yellow-400/10" : "bg-emerald-400/10";
+              const progressPct = s.c != null
+                ? Math.min((Math.abs(s.currentPrice - s.c) / Math.abs(s.c - s.projectedD)) * 100, 100)
+                : 0;
+              const barColor =
+                s.distancePct < 2 ? "bg-rose-400" :
+                s.distancePct < 5 ? "bg-orange-400" :
+                s.distancePct < 10 ? "bg-yellow-400" : "bg-emerald-400";
+              const tvInterval = s.timeframe === "1D" ? "D" : "240";
+              const tvSymbol = s.symbol.replace("/", "");
+              return (
+                <div
+                  key={s.id}
+                  className={`px-4 py-3 hover:bg-gray-800/40 ${isCryptoShort ? "opacity-50" : ""} ${i === 0 && s.distancePct < 5 ? "bg-rose-500/5" : ""}`}
+                >
+                  {/* Row 1: Symbol + urgency */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-block w-2 h-2 rounded-full ${isLong ? "bg-emerald-400" : "bg-red-400"}`}
+                      />
+                      <span className="font-semibold">{s.symbol}</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                        {s.timeframe}
+                      </span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                        {s.pattern}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                          isLong ? "bg-emerald-400/10 text-emerald-400" : "bg-red-400/10 text-red-400"
+                        }`}
+                      >
+                        {s.direction}
+                      </span>
+                      {isCryptoShort && (
+                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-orange-400/10 text-orange-400">
+                          VIEW ONLY
+                        </span>
+                      )}
+                      {canExecute && (
+                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-400/10 text-emerald-400">
+                          AUTO-TRADE
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-[10px] font-bold uppercase tracking-wide ${urgencyColor}`}>
+                        {urgency}
+                      </span>
+                      <div className={`text-lg font-bold font-mono ${urgencyColor}`}>
+                        {s.distancePct.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                  {/* Row 2: Progress bar C → D */}
+                  <div className="mb-2">
+                    <div className="flex justify-between text-[10px] text-gray-500 font-mono mb-1">
+                      <span>C: {formatUsd(s.c ?? 0)}</span>
+                      <span>Now: {formatUsd(s.currentPrice)}</span>
+                      <span>D: {formatUsd(s.projectedD)}</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${barColor} transition-all duration-700`}
+                        style={{ width: `${Math.min(progressPct, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  {/* Row 3: Trade levels */}
+                  <div className="flex gap-4 text-xs mb-1">
+                    <span className="text-gray-400">
+                      Entry <span className="text-gray-200 font-mono">{formatUsd(s.projectedD)}</span>
+                    </span>
+                    <span className="text-gray-400">
+                      SL <span className="text-red-400 font-mono">{formatUsd(s.sl)}</span>
+                    </span>
+                    <span className="text-gray-400">
+                      TP1 <span className="text-emerald-400 font-mono">{formatUsd(s.tp1)}</span>
+                    </span>
+                    <span className="text-gray-400">
+                      TP2 <span className="text-emerald-400 font-mono">{formatUsd(s.tp2)}</span>
+                    </span>
+                    <span className="text-gray-400">
+                      R:R <span className="text-yellow-400 font-mono">{rr}</span>
+                    </span>
+                  </div>
+                  {/* Row 4: XABC + TradingView link */}
+                  <div className="flex items-center justify-between">
+                    {s.x != null && (
+                      <div className="text-[10px] text-gray-600 font-mono flex gap-2">
+                        <span>X={formatUsd(s.x)}</span>
+                        <span>A={formatUsd(s.a!)}</span>
+                        <span>B={formatUsd(s.b!)}</span>
+                        <span>C={formatUsd(s.c!)}</span>
+                      </div>
+                    )}
+                    <a
+                      href={`https://www.tradingview.com/chart/?symbol=${tvSymbol}&interval=${tvInterval}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-semibold tracking-wide text-gray-500 hover:text-gray-300 transition-colors"
+                    >
+                      TRADINGVIEW ↗
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* ==================== BODY ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
