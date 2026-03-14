@@ -398,8 +398,6 @@ export default function App() {
           <div className="max-h-[700px] overflow-y-auto divide-y divide-gray-800/50">
             {approaching.map((s, i) => {
               const isLong = s.direction === "long";
-              const isCryptoShort = !isLong && s.symbol.includes("/");
-              const canExecute = isLong || !s.symbol.includes("/");
               const riskPct = s.projectedD > 0
                 ? (Math.abs(s.projectedD - s.sl) / s.projectedD) * 100
                 : 0;
@@ -433,7 +431,7 @@ export default function App() {
               return (
                 <div
                   key={s.id}
-                  className={`px-4 py-3 hover:bg-gray-800/40 ${isCryptoShort ? "opacity-50" : ""} ${i === 0 && s.distancePct < 5 ? "bg-rose-500/5" : ""}`}
+                  className={`px-4 py-3 hover:bg-gray-800/40 ${i === 0 && s.distancePct < 5 ? "bg-rose-500/5" : ""}`}
                 >
                   {/* Row 1: Symbol + badges + urgency */}
                   <div className="flex items-center justify-between mb-2">
@@ -452,16 +450,6 @@ export default function App() {
                       >
                         {s.direction}
                       </span>
-                      {isCryptoShort && (
-                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-orange-400/10 text-orange-400">
-                          VIEW ONLY
-                        </span>
-                      )}
-                      {canExecute && (
-                        <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-400/10 text-emerald-400">
-                          AUTO-TRADE
-                        </span>
-                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <span className={`text-[10px] font-bold uppercase tracking-wide ${urgencyColor}`}>
