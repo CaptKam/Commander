@@ -82,9 +82,13 @@ export async function ensureTablesExist(): Promise<void> {
       )
     `);
     // Fix any bare crypto tickers from previous seeds (e.g. "XRP" → "XRP/USD")
+    // Also purge stale live_signals with bare symbols so they stop generating orders
     for (const base of ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "AVAX", "LINK", "LTC", "SUI"]) {
       await db.execute(sql.raw(
         `DELETE FROM watchlist WHERE symbol = '${base}'`
+      ));
+      await db.execute(sql.raw(
+        `DELETE FROM live_signals WHERE symbol = '${base}'`
       ));
     }
 

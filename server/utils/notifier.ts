@@ -105,8 +105,9 @@ export async function sendError(
   const errorMessage =
     error instanceof Error ? error.message : String(error);
 
-  // Dedup: same context + message = same alert. Don't spam.
-  const dedupKey = `error:${context}:${errorMessage}`;
+  // Dedup: key on context only (contains symbol + pattern), not the full error
+  // message which includes varying order details that bypass dedup.
+  const dedupKey = `error:${context}`;
   if (isDuplicate(dedupKey, ERROR_COOLDOWN_MS)) {
     return;
   }

@@ -414,6 +414,10 @@ async function runScanCycle(): Promise<void> {
           console.log(
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
           );
+        } else if (isCrypto && signal.direction === "short") {
+          console.log(
+            `[Alpaca] Skipping crypto SHORT — cannot short crypto without holdings: ${signal.symbol} ${signal.pattern}`,
+          );
         } else if (equity !== null) {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
             equity: settings.equityAllocation,
