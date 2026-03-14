@@ -12,6 +12,9 @@
  * Auto-reconnects with exponential backoff on disconnection.
  * Heartbeat ping every 30s to keep connections alive.
  *
+ * SIP stream only connects during market hours (Mon-Fri 4AM-8PM ET).
+ * Crypto stream runs 24/7.
+ *
  * NOTE: The price cache is ephemeral (in-memory). It does NOT store
  * trade state — complies with CLAUDE.md Rule #2.
  */
@@ -66,6 +69,15 @@ const INITIAL_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
+// SIP-specific backoff steps: 2s, 5s, 10s, 30s, 60s
+const SIP_BACKOFF_STEPS = [2_000, 5_000, 10_000, 30_000, 60_000];
+const SIP_MAX_CONSECUTIVE_FAILURES = 5;
+// If a connection survives this long, reset the failure counter
+const SIP_STABLE_CONNECTION_MS = 30_000;
+
+// SIP market hours check interval (check every 5 minutes when suspended)
+const SIP_MARKET_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 // ============================================================
 // Connection state
 // ============================================================
@@ -77,6 +89,28 @@ let cryptoHeartbeat: ReturnType<typeof setInterval> | null = null;
 let stockHeartbeat: ReturnType<typeof setInterval> | null = null;
 let cryptoSymbols: string[] = [];
 let stockSymbols: string[] = [];
+
+// SIP-specific state
+let sipConsecutiveFailures = 0;
+let sipSuspended = false;
+let sipMarketCheckTimer: ReturnType<typeof setInterval> | null = null;
+let sipReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let sipConnectionOpenedAt = 0;
+
+// ============================================================
+// SIP Market Hours — Mon-Fri 4:00 AM to 8:00 PM Eastern
+// ============================================================
+function isSipMarketHours(): boolean {
+  const now = new Date();
+  // Convert to Eastern Time
+  const eastern = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const day = eastern.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+
+  const hour = eastern.getHours();
+  // 4:00 AM (hour=4) to 8:00 PM (hour=20, i.e. < 20)
+  return hour >= 4 && hour < 20;
+}
 
 // ============================================================
 // Alpaca WebSocket message types
@@ -98,6 +132,22 @@ interface AlpacaMessage {
 }
 
 // ============================================================
+// Force-close a WebSocket — ensures no stale connections
+// ============================================================
+function forceCloseWs(ws: WebSocket | null): void {
+  if (!ws) return;
+  try {
+    ws.removeAllListeners();
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+    ws.terminate();
+  } catch {
+    // Swallow — we just want it dead
+  }
+}
+
+// ============================================================
 // Generic WebSocket connection factory
 // ============================================================
 function createStream(
@@ -107,12 +157,46 @@ function createStream(
   getReconnectMs: () => number,
   setReconnectMs: (ms: number) => void,
   setWs: (ws: WebSocket | null) => void,
+  getWs: () => WebSocket | null,
   setHeartbeat: (id: ReturnType<typeof setInterval> | null) => void,
   getHeartbeat: () => ReturnType<typeof setInterval> | null,
 ): void {
   if (symbols.length === 0) {
     console.log(`[WebSocket] ${label}: no symbols to subscribe — skipping`);
     return;
+  }
+
+  // --- SIP-specific guards ---
+  const isSip = label === "Stock/SIP";
+
+  if (isSip) {
+    // Don't connect if market is closed
+    if (!isSipMarketHours()) {
+      console.log(`[WebSocket] ${label}: market closed — skipping connection. Will retry at next market open.`);
+      scheduleSipMarketCheck();
+      return;
+    }
+
+    // Don't connect if suspended after too many failures
+    if (sipSuspended) {
+      console.log(`[WebSocket] ${label}: reconnect suspended — waiting for next market open`);
+      scheduleSipMarketCheck();
+      return;
+    }
+
+    // Cleanup: close any existing SIP connection before opening a new one
+    const existingWs = getWs();
+    if (existingWs) {
+      console.log(`[WebSocket] ${label}: closing existing connection before reconnect`);
+      forceCloseWs(existingWs);
+      setWs(null);
+    }
+
+    // Clear any pending reconnect timer
+    if (sipReconnectTimer) {
+      clearTimeout(sipReconnectTimer);
+      sipReconnectTimer = null;
+    }
   }
 
   const { key, secret } = getAlpacaKeys();
@@ -124,6 +208,10 @@ function createStream(
   ws.on("open", () => {
     console.log(`[WebSocket] ${label}: connected`);
     setReconnectMs(INITIAL_RECONNECT_MS);
+
+    if (isSip) {
+      sipConnectionOpenedAt = Date.now();
+    }
 
     // Authenticate
     ws.send(JSON.stringify({
@@ -162,7 +250,7 @@ function createStream(
           });
         }
 
-        // Auth error
+        // Auth/connection error
         if (msg.T === "error") {
           console.error(`[WebSocket] ${label}: error — code=${msg.code} msg=${msg.msg}`);
         }
@@ -173,19 +261,62 @@ function createStream(
   });
 
   ws.on("close", (code: number, reason: Buffer) => {
-    console.warn(
-      `[WebSocket] ${label}: disconnected (code=${code} reason=${reason.toString()}) — ` +
-      `reconnecting in ${getReconnectMs() / 1000}s`,
-    );
     setWs(null);
     clearHeartbeat(getHeartbeat, setHeartbeat);
 
-    // Reconnect with exponential backoff
-    setTimeout(() => {
-      const nextMs = Math.min(getReconnectMs() * 2, MAX_RECONNECT_MS);
-      setReconnectMs(nextMs);
-      createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, setHeartbeat, getHeartbeat);
-    }, getReconnectMs());
+    if (isSip) {
+      // Check if this connection was stable (survived > 30s)
+      const connectionDuration = Date.now() - sipConnectionOpenedAt;
+      if (sipConnectionOpenedAt > 0 && connectionDuration > SIP_STABLE_CONNECTION_MS) {
+        sipConsecutiveFailures = 0;
+      } else {
+        sipConsecutiveFailures++;
+      }
+
+      // If market is now closed, don't reconnect
+      if (!isSipMarketHours()) {
+        console.log(`[WebSocket] ${label}: disconnected (code=${code}) — market closed, not reconnecting`);
+        scheduleSipMarketCheck();
+        return;
+      }
+
+      // If too many consecutive failures, suspend
+      if (sipConsecutiveFailures >= SIP_MAX_CONSECUTIVE_FAILURES) {
+        sipSuspended = true;
+        console.error(
+          `[WebSocket] SIP reconnect suspended — ${sipConsecutiveFailures} consecutive failures. ` +
+          `Will retry at next market open.`,
+        );
+        scheduleSipMarketCheck();
+        return;
+      }
+
+      // Exponential backoff: 2s, 5s, 10s, 30s, 60s
+      const backoffIdx = Math.min(sipConsecutiveFailures, SIP_BACKOFF_STEPS.length - 1);
+      const delayMs = SIP_BACKOFF_STEPS[backoffIdx];
+
+      console.warn(
+        `[WebSocket] ${label}: disconnected (code=${code} reason=${reason.toString()}) — ` +
+        `reconnecting in ${delayMs / 1000}s (failure ${sipConsecutiveFailures}/${SIP_MAX_CONSECUTIVE_FAILURES})`,
+      );
+
+      sipReconnectTimer = setTimeout(() => {
+        sipReconnectTimer = null;
+        createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
+      }, delayMs);
+    } else {
+      // Crypto — keep existing exponential backoff behavior
+      console.warn(
+        `[WebSocket] ${label}: disconnected (code=${code} reason=${reason.toString()}) — ` +
+        `reconnecting in ${getReconnectMs() / 1000}s`,
+      );
+
+      setTimeout(() => {
+        const nextMs = Math.min(getReconnectMs() * 2, MAX_RECONNECT_MS);
+        setReconnectMs(nextMs);
+        createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
+      }, getReconnectMs());
+    }
   });
 
   ws.on("error", (err: Error) => {
@@ -215,12 +346,50 @@ function clearHeartbeat(
 }
 
 // ============================================================
+// SIP market hours poller — checks periodically and reconnects
+// when market opens again
+// ============================================================
+function scheduleSipMarketCheck(): void {
+  // Don't stack multiple timers
+  if (sipMarketCheckTimer) return;
+
+  sipMarketCheckTimer = setInterval(() => {
+    if (isSipMarketHours() && stockSymbols.length > 0) {
+      console.log("[WebSocket] Stock/SIP: market is open — attempting connection");
+      // Clear the check timer
+      if (sipMarketCheckTimer) {
+        clearInterval(sipMarketCheckTimer);
+        sipMarketCheckTimer = null;
+      }
+      // Reset suspension state for new market session
+      sipSuspended = false;
+      sipConsecutiveFailures = 0;
+      // Attempt connection
+      createStream(
+        STOCK_WS_URL,
+        "Stock/SIP",
+        stockSymbols,
+        () => stockReconnectMs,
+        (ms) => { stockReconnectMs = ms; },
+        (ws) => { stockWs = ws; },
+        () => stockWs,
+        (hb) => { stockHeartbeat = hb; },
+        () => stockHeartbeat,
+      );
+    }
+  }, SIP_MARKET_CHECK_INTERVAL_MS);
+}
+
+// ============================================================
 // Public API
 // ============================================================
 
 /**
  * Starts both crypto and stock WebSocket streams.
  * Call once at boot after loading the watchlist from DB.
+ *
+ * Crypto streams run 24/7. Stock/SIP streams only connect
+ * during market hours (Mon-Fri 4:00 AM - 8:00 PM ET).
  *
  * @param watchlist  Array of symbols (e.g., ["BTC/USD", "AAPL"])
  */
@@ -232,7 +401,7 @@ export function startPriceStreams(watchlist: string[]): void {
     `[WebSocket] Starting streams: ${cryptoSymbols.length} crypto, ${stockSymbols.length} stocks`,
   );
 
-  // Crypto stream
+  // Crypto stream — always on
   createStream(
     CRYPTO_WS_URL,
     "Crypto",
@@ -240,11 +409,12 @@ export function startPriceStreams(watchlist: string[]): void {
     () => cryptoReconnectMs,
     (ms) => { cryptoReconnectMs = ms; },
     (ws) => { cryptoWs = ws; },
+    () => cryptoWs,
     (hb) => { cryptoHeartbeat = hb; },
     () => cryptoHeartbeat,
   );
 
-  // Stock stream (SIP)
+  // Stock stream (SIP) — market hours only
   createStream(
     STOCK_WS_URL,
     "Stock/SIP",
@@ -252,6 +422,7 @@ export function startPriceStreams(watchlist: string[]): void {
     () => stockReconnectMs,
     (ms) => { stockReconnectMs = ms; },
     (ws) => { stockWs = ws; },
+    () => stockWs,
     (hb) => { stockHeartbeat = hb; },
     () => stockHeartbeat,
   );
@@ -261,14 +432,21 @@ export function startPriceStreams(watchlist: string[]): void {
  * Gracefully closes both WebSocket connections.
  */
 export function stopPriceStreams(): void {
-  if (cryptoWs) {
-    cryptoWs.close();
-    cryptoWs = null;
+  // Clear SIP timers
+  if (sipReconnectTimer) {
+    clearTimeout(sipReconnectTimer);
+    sipReconnectTimer = null;
   }
-  if (stockWs) {
-    stockWs.close();
-    stockWs = null;
+  if (sipMarketCheckTimer) {
+    clearInterval(sipMarketCheckTimer);
+    sipMarketCheckTimer = null;
   }
+
+  forceCloseWs(cryptoWs);
+  cryptoWs = null;
+  forceCloseWs(stockWs);
+  stockWs = null;
+
   clearHeartbeat(() => cryptoHeartbeat, (hb) => { cryptoHeartbeat = hb; });
   clearHeartbeat(() => stockHeartbeat, (hb) => { stockHeartbeat = hb; });
   console.log("[WebSocket] All streams stopped");
@@ -290,7 +468,7 @@ export function getStreamStatus(): { crypto: string; stock: string; priceCount: 
   };
   return {
     crypto: wsState(cryptoWs),
-    stock: wsState(stockWs),
+    stock: sipSuspended ? "suspended" : wsState(stockWs),
     priceCount: latestPrices.size,
   };
 }
