@@ -311,11 +311,29 @@ async function placeExitOrders(signal: {
     limit_price: String(safeTp1Price),
   });
 
+  // Re-query position AFTER TP1 is placed — Alpaca has now locked TP1's qty.
+  // Using stale pre-calculated tp2Qty causes 403 "qty exceeds available" errors.
   let tp2Order: AlpacaOrder;
   try {
+    const freshPosition = await getPosition(signal.symbol);
+    const freshAvailable = freshPosition ? Number(freshPosition.qty_available) : 0;
+    const freshTp2Qty = formatAlpacaQty(freshAvailable, isCrypto);
+
+    console.log(
+      `[ExitManager] TP2 for ${signal.symbol} #${signal.id}: ` +
+      `fresh qty_available=${freshAvailable}, using qty=${freshTp2Qty} (was ${safeTp2Qty})`,
+    );
+
+    if (freshAvailable <= 0) {
+      console.warn(
+        `[ExitManager] TP1 placed (${tp1Order.id}) but no qty_available left for TP2 — next cycle will fix`,
+      );
+      return { tp1Id: tp1Order.id, tp2Id: null, positionQty: String(positionQty) };
+    }
+
     tp2Order = await placeOrder({
       symbol: signal.symbol,
-      qty: String(safeTp2Qty),
+      qty: String(freshTp2Qty),
       side: exitSide,
       type: "limit",
       time_in_force: "gtc",
