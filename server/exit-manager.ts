@@ -106,6 +106,7 @@ async function placeOrder(payload: Record<string, string>): Promise<AlpacaOrder>
 interface AlpacaPosition {
   symbol: string;
   qty: string;
+  qty_available: string;
   side: string;
   avg_entry_price: string;
   current_price: string;
@@ -221,28 +222,26 @@ async function placeExitOrders(signal: {
   const isCrypto = signal.symbol.includes("/");
   const exitSide = signal.direction === "long" ? "sell" : "buy";
 
-  // Step 1: Query ACTUAL Alpaca position — this is the only source of truth
+  // Step 1: Query ACTUAL Alpaca position — qty_available is the source of truth.
+  // qty_available already subtracts qty locked by existing open orders.
   const position = await getPosition(signal.symbol);
   if (!position || Number(position.qty) <= 0) {
     throw new Error(`No Alpaca position for ${signal.symbol} — cannot place exits`);
   }
   const positionQty = Number(position.qty);
-
-  // Step 2: Check existing open orders to find already-locked qty
-  const openOrders = await getOpenOrders(signal.symbol);
-  const exitOrders = openOrders.filter((o) => o.side === exitSide);
-  const alreadyOrderedQty = exitOrders.reduce((sum, o) => sum + Number(o.qty), 0);
+  const availableQty = Number(position.qty_available);
 
   console.log(
-    `[ExitManager] ${signal.symbol} #${signal.id}: position=${positionQty}, ` +
-    `already ordered=${alreadyOrderedQty} (${exitOrders.length} open exit orders)`,
+    `[ExitManager] ${signal.symbol} #${signal.id}: qty=${positionQty}, ` +
+    `qty_available=${availableQty}`,
   );
 
-  const availableQty = positionQty - alreadyOrderedQty;
-
-  // If both exits already exist, nothing to do
-  if (exitOrders.length >= 2) {
-    console.log(`[ExitManager] ${signal.symbol} #${signal.id}: 2 exit orders already exist`);
+  // If nothing is available, exits already cover the full position
+  if (availableQty <= 0) {
+    // Return existing exit order IDs from open orders
+    const openOrders = await getOpenOrders(signal.symbol);
+    const exitOrders = openOrders.filter((o) => o.side === exitSide);
+    console.log(`[ExitManager] ${signal.symbol} #${signal.id}: fully covered by ${exitOrders.length} exit orders`);
     return {
       tp1Id: exitOrders[0]?.id ?? null,
       tp2Id: exitOrders[1]?.id ?? null,
@@ -254,18 +253,16 @@ async function placeExitOrders(signal: {
   const safeTp1Price = formatAlpacaPrice(Number(signal.tp1Price), isCrypto);
   const safeTp2Price = formatAlpacaPrice(Number(signal.tp2Price), isCrypto);
 
-  // Case A: One exit order already exists — place ONLY the second
-  if (exitOrders.length === 1) {
-    if (availableQty <= 0) {
-      throw new Error(
-        `${signal.symbol}: position=${positionQty} but ${alreadyOrderedQty} already ordered — ` +
-        `no qty available for second exit`,
-      );
-    }
+  // If only part of the position is available, one exit already exists.
+  // Place ONLY the second exit for exactly qty_available.
+  if (availableQty < positionQty) {
     const safeQty = formatAlpacaQty(availableQty, isCrypto);
+    const openOrders = await getOpenOrders(signal.symbol);
+    const exitOrders = openOrders.filter((o) => o.side === exitSide);
+
     console.log(
       `[ExitManager] Placing SECOND exit for ${signal.symbol} #${signal.id}: ` +
-      `qty=${safeQty} (available=${availableQty}, position=${positionQty}, locked=${alreadyOrderedQty})`,
+      `qty=${safeQty} (available=${availableQty}, total=${positionQty})`,
     );
 
     const secondOrder = await placeOrder({
@@ -278,20 +275,20 @@ async function placeExitOrders(signal: {
     });
 
     return {
-      tp1Id: exitOrders[0].id,
+      tp1Id: exitOrders[0]?.id ?? null,
       tp2Id: secondOrder.id,
       positionQty: String(positionQty),
     };
   }
 
-  // Case B: No exit orders — fresh split
-  // Floor to 6 decimal places for crypto (safer than 9 — avoids fee/rounding edge cases)
+  // Full position available — fresh split using qty_available
+  // Floor to 6 decimal places for crypto
   const tp1Qty = isCrypto
-    ? Math.floor(positionQty * 0.5 * 1e6) / 1e6
-    : Math.floor(positionQty * 0.5);
+    ? Math.floor(availableQty * 0.5 * 1e6) / 1e6
+    : Math.floor(availableQty * 0.5);
   const tp2Qty = isCrypto
-    ? Math.floor((positionQty - tp1Qty) * 1e6) / 1e6
-    : positionQty - tp1Qty;
+    ? Math.floor((availableQty - tp1Qty) * 1e6) / 1e6
+    : availableQty - tp1Qty;
 
   const safeTp1Qty = formatAlpacaQty(tp1Qty, isCrypto);
   const safeTp2Qty = formatAlpacaQty(tp2Qty, isCrypto);
