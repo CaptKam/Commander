@@ -679,6 +679,25 @@ export default function App() {
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
             </button>
+            <button
+              onClick={async () => {
+                if (confirm("Clear all signals from the feed?")) {
+                  try {
+                    const res = await fetch("/api/signals/clear", { method: "POST" });
+                    if (res.ok) {
+                      setSignals([]);
+                      console.log("Feed cleared");
+                    }
+                  } catch (err) {
+                    console.error("Failed to clear feed:", err);
+                  }
+                }
+              }}
+              className="p-1 rounded hover:bg-red-900/30 text-gray-400 hover:text-red-400 transition-colors"
+              title="Clear all signals"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
           </div>
           {signals.length === 0 ? (
             <div className="p-8 text-center text-gray-500 text-sm">
