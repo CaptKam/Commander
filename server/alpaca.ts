@@ -53,9 +53,9 @@ interface AlpacaOrderResponse {
 }
 
 /**
- * Fetches current account equity from Alpaca.
+ * Fetches current account equity and available buying power from Alpaca.
  */
-export async function getAccountEquity(): Promise<number> {
+export async function getAccountEquity(): Promise<{ equity: number; buyingPower: number }> {
   assertKeysPresent();
 
   const res = await fetch(`${ALPACA_BASE_URL}/v2/account`, {
@@ -70,8 +70,11 @@ export async function getAccountEquity(): Promise<number> {
     throw new Error(`Alpaca account fetch failed: ${res.status} — ${body}`);
   }
 
-  const account = (await res.json()) as { equity: string };
+  const account = (await res.json()) as { equity: string; buying_power: string; non_marginable_buying_power: string };
   const equity = Number(account.equity);
+  // For crypto, Alpaca uses non_marginable_buying_power as the real available cash.
+  // Fall back to buying_power if non_marginable is missing.
+  const buyingPower = Number(account.non_marginable_buying_power || account.buying_power);
 
   if (!Number.isFinite(equity) || equity <= 0) {
     throw new Error(
@@ -79,7 +82,7 @@ export async function getAccountEquity(): Promise<number> {
     );
   }
 
-  return equity;
+  return { equity, buyingPower: Number.isFinite(buyingPower) ? buyingPower : equity };
 }
 
 /**
@@ -97,6 +100,7 @@ export async function placePhaseCLimitOrder(
   accountEquity: number,
   isCrypto: boolean,
   allocationOverride?: { equity: number; crypto: number },
+  availableBuyingPower?: number,
 ): Promise<AlpacaOrderResponse> {
   assertKeysPresent();
 
@@ -104,7 +108,19 @@ export async function placePhaseCLimitOrder(
   const equityAlloc = allocationOverride?.equity ?? DEFAULT_EQUITY_ALLOCATION;
   const cryptoAlloc = allocationOverride?.crypto ?? DEFAULT_CRYPTO_ALLOCATION;
   const allocation = isCrypto ? cryptoAlloc : equityAlloc;
-  const allocatedFunds = accountEquity * allocation;
+  let allocatedFunds = accountEquity * allocation;
+
+  // ---- Cap to available buying power so we never request more than we have ----
+  if (availableBuyingPower !== undefined && availableBuyingPower > 0) {
+    // Leave a small buffer (2%) to account for rounding / fees
+    const maxUsable = availableBuyingPower * 0.98;
+    if (allocatedFunds > maxUsable) {
+      console.warn(
+        `[Alpaca] Capping order from $${allocatedFunds.toFixed(2)} to $${maxUsable.toFixed(2)} (available buying power: $${availableBuyingPower.toFixed(2)})`,
+      );
+      allocatedFunds = maxUsable;
+    }
+  }
 
   // ---- Step 2: Raw quantity ----
   const rawQty = allocatedFunds / signal.limitPrice;
