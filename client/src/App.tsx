@@ -6,8 +6,6 @@ import {
   Zap,
   Target,
   BarChart3,
-  Plus,
-  Minus,
   Eye,
   Settings,
   Power,
@@ -18,25 +16,17 @@ import {
   Clock,
   AlertTriangle,
   XCircle,
-  ChevronUp,
   FileBarChart,
   DollarSign,
   Percent,
   ArrowUpRight,
   ArrowDownRight,
-  Filter,
   List,
-  PieChart,
   Crosshair,
-  Lock,
   Unlock,
-  RefreshCw,
   CheckCircle2,
   XOctagon,
   Layers,
-  Hash,
-  Calendar,
-  LayoutGrid,
 } from "lucide-react";
 
 interface Account {
@@ -128,12 +118,12 @@ interface TradeHistory {
   filled_price: number;
   submitted_at: string;
   filled_at: string;
-  pattern: string;
-  direction: string;
-  entry_price: number;
-  stop_loss: number;
-  tp1: number;
-  tp2: number;
+  pattern: string | null;
+  direction: string | null;
+  entry_price: number | null;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
 }
 
 interface WatchlistItem {
@@ -802,9 +792,9 @@ function PortfolioPanel({ positions, history, account }: { positions: Position[]
           {history.slice(0, 15).map((t, i) => (
             <div key={i} className="grid grid-cols-7 gap-2 px-4 py-2 border-b text-xs items-center" style={{ borderColor: "var(--border-color)" }}>
               <div className="font-mono text-white">{t.symbol}</div>
-              <div style={{ color: "var(--accent-amber)" }}>{t.pattern}</div>
-              <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction}</span></div>
-              <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{formatUsd(t.entry_price)}</div>
+              <div style={{ color: "var(--accent-amber)" }}>{t.pattern || "—"}</div>
+              <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction || t.side}</span></div>
+              <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.entry_price != null ? formatUsd(t.entry_price) : "—"}</div>
               <div className="text-right font-mono text-white">{formatUsd(t.filled_price)}</div>
               <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.qty.toFixed(2)}</div>
               <div className="text-right text-[10px]" style={{ color: "var(--text-muted)" }}>{timeAgo(t.filled_at)}</div>
@@ -820,11 +810,13 @@ function PortfolioPanel({ positions, history, account }: { positions: Position[]
 }
 
 function SlippagePanel({ history }: { history: TradeHistory[] }) {
-  const slippageData = history.map((t) => {
-    const slippage = t.filled_price - t.entry_price;
-    const slippagePct = (slippage / t.entry_price) * 100;
-    const slippageDir = t.direction === "long" ? slippage : -slippage;
-    return { ...t, slippage: slippageDir, slippagePct: t.direction === "long" ? slippagePct : -slippagePct };
+  const slippageData = history.filter((t) => t.entry_price != null).map((t) => {
+    const entryPrice = t.entry_price!;
+    const slippage = t.filled_price - entryPrice;
+    const slippagePct = (slippage / entryPrice) * 100;
+    const dir = t.direction || t.side;
+    const slippageDir = dir === "long" || dir === "buy" ? slippage : -slippage;
+    return { ...t, slippage: slippageDir, slippagePct: dir === "long" || dir === "buy" ? slippagePct : -slippagePct };
   });
 
   const avgSlippage = slippageData.length > 0
@@ -859,9 +851,9 @@ function SlippagePanel({ history }: { history: TradeHistory[] }) {
           {slippageData.map((d, i) => (
             <div key={i} className="grid grid-cols-7 gap-2 px-4 py-2.5 border-b text-xs items-center" style={{ borderColor: "var(--border-color)" }}>
               <div className="font-mono text-white">{d.symbol}</div>
-              <div style={{ color: "var(--accent-amber)" }}>{d.pattern}</div>
-              <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: d.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: d.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{d.direction}</span></div>
-              <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{formatUsd(d.entry_price)}</div>
+              <div style={{ color: "var(--accent-amber)" }}>{d.pattern || "—"}</div>
+              <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: (d.direction || d.side) === "long" || d.side === "buy" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: (d.direction || d.side) === "long" || d.side === "buy" ? "var(--accent-green)" : "var(--accent-red)" }}>{d.direction || d.side}</span></div>
+              <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{d.entry_price != null ? formatUsd(d.entry_price) : "—"}</div>
               <div className="text-right font-mono text-white">{formatUsd(d.filled_price)}</div>
               <div className="text-right font-mono" style={{ color: d.slippagePct <= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                 {d.slippagePct > 0 ? "+" : ""}{d.slippagePct.toFixed(4)}%
@@ -1090,13 +1082,13 @@ function AnalyticsPage({ history, signals, approaching, metrics, analyticsData, 
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
             <div className="font-mono text-white">{t.symbol}</div>
-            <div style={{ color: "var(--accent-amber)" }}>{t.pattern}</div>
-            <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction}</span></div>
-            <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{formatUsd(t.entry_price)}</div>
+            <div style={{ color: "var(--accent-amber)" }}>{t.pattern || "—"}</div>
+            <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction || t.side}</span></div>
+            <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.entry_price != null ? formatUsd(t.entry_price) : "—"}</div>
             <div className="text-right font-mono text-white">{formatUsd(t.filled_price)}</div>
             <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.qty.toFixed(2)}</div>
-            <div className="text-right font-mono" style={{ color: "var(--accent-red)" }}>{formatUsd(t.stop_loss)}</div>
-            <div className="text-right font-mono" style={{ color: "var(--accent-green)" }}>{formatUsd(t.tp1)}</div>
+            <div className="text-right font-mono" style={{ color: "var(--accent-red)" }}>{t.stop_loss != null ? formatUsd(t.stop_loss) : "—"}</div>
+            <div className="text-right font-mono" style={{ color: "var(--accent-green)" }}>{t.tp1 != null ? formatUsd(t.tp1) : "—"}</div>
             <div className="text-right text-[10px]" style={{ color: "var(--text-muted)" }}>
               {new Date(t.filled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
             </div>
@@ -1296,7 +1288,7 @@ function LogsPage({ signals, approaching, history, status, isOnline }: {
       events.push({
         time: t.filled_at,
         type: "FILL",
-        message: `${t.direction.toUpperCase()} ${t.symbol} ${t.pattern} filled ${t.qty.toFixed(2)} @ ${formatUsd(t.filled_price)} (target: ${formatUsd(t.entry_price)})`,
+        message: `${(t.direction || t.side).toUpperCase()} ${t.symbol} ${t.pattern || "—"} filled ${t.qty.toFixed(2)} @ ${formatUsd(t.filled_price)}${t.entry_price != null ? ` (target: ${formatUsd(t.entry_price)})` : ""}`,
         level: "success",
       });
     });
