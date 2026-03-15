@@ -73,6 +73,10 @@ export async function ensureTablesExist(): Promise<void> {
         `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS ${col} NUMERIC(20,10)`
       ));
     }
+    // exit_retries tracks how many times exit order placement has failed
+    await db.execute(sql.raw(
+      `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS exit_retries INTEGER NOT NULL DEFAULT 0`
+    ));
     console.log("[DB] Table live_signals: OK");
 
     await db.execute(sql`

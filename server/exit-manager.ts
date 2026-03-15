@@ -32,6 +32,7 @@ import { formatAlpacaQty, formatAlpacaPrice } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
 import { getStreamPrice } from "./websocket-stream";
 import { getLatestCachedPrice } from "./alpaca-data";
+import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 
 // ============================================================
 // Environment
@@ -66,6 +67,7 @@ interface AlpacaOrder {
 async function getOrder(orderId: string): Promise<AlpacaOrder | null> {
   const { key, secret, base } = getAlpacaConfig();
   try {
+    checkTradingRateLimit();
     const res = await fetch(`${base}/v2/orders/${orderId}`, {
       headers: {
         "APCA-API-KEY-ID": key,
@@ -86,6 +88,7 @@ async function getOrder(orderId: string): Promise<AlpacaOrder | null> {
 
 async function placeOrder(payload: Record<string, string>): Promise<AlpacaOrder> {
   const { key, secret, base } = getAlpacaConfig();
+  checkTradingRateLimit();
   const res = await fetch(`${base}/v2/orders`, {
     method: "POST",
     headers: {
@@ -120,6 +123,7 @@ interface AlpacaPosition {
 async function getPosition(symbol: string): Promise<AlpacaPosition | null> {
   const { key, secret, base } = getAlpacaConfig();
   try {
+    checkTradingRateLimit();
     // Alpaca position endpoint uses symbol without slash for crypto
     const encodedSymbol = encodeURIComponent(symbol);
     const res = await fetch(`${base}/v2/positions/${encodedSymbol}`, {
@@ -438,15 +442,19 @@ export async function runExitCycle(): Promise<void> {
           });
 
           // Persist to DB (CLAUDE.md Rule #2 — never in-memory only)
+          // Only reset exitRetries if BOTH exits succeeded. If TP2 is still
+          // missing, increment retries so the counter actually accumulates
+          // toward MAX_EXIT_RETRIES instead of resetting to 0 each cycle.
+          const bothPlaced = !!(exits.tp1Id && exits.tp2Id);
           await db
             .update(liveSignals)
             .set({
-              status: exits.tp1Id && exits.tp2Id ? "filled" : "pending",
+              status: bothPlaced ? "filled" : "pending",
               filledQty: exits.positionQty,
               filledAvgPrice: order.filled_avg_price,
               tp1OrderId: exits.tp1Id,
               tp2OrderId: exits.tp2Id,
-              exitRetries: 0,
+              exitRetries: bothPlaced ? 0 : signal.exitRetries + 1,
               executedAt: new Date(),
             })
             .where(eq(liveSignals.id, signal.id));
