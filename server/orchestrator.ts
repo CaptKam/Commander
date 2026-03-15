@@ -323,9 +323,12 @@ async function runScanCycle(): Promise<void> {
     // outage doesn't kill the scan — signals still get logged.
     // ============================================================
     let equity: number | null = null;
+    let buyingPower: number | null = null;
     try {
-      equity = await getAccountEquity();
-      console.log(`[Orchestrator] Account equity: $${equity.toFixed(2)}`);
+      const acct = await getAccountEquity();
+      equity = acct.equity;
+      buyingPower = acct.buyingPower;
+      console.log(`[Orchestrator] Account equity: $${equity.toFixed(2)}, buying power: $${buyingPower.toFixed(2)}`);
     } catch (err) {
       console.error("[Orchestrator] Failed to fetch Alpaca equity:", err);
       sendError("Alpaca equity fetch failed — signals detected but orders skipped", err).catch(() => {
@@ -422,7 +425,7 @@ async function runScanCycle(): Promise<void> {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
             equity: settings.equityAllocation,
             crypto: settings.cryptoAllocation,
-          });
+          }, buyingPower ?? undefined);
           // Save the Alpaca order ID so exit-manager can track fills
           await db
             .update(liveSignals)

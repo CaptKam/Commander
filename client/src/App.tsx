@@ -401,9 +401,25 @@ export default function App() {
         </nav>
 
         <div className="flex items-center space-x-3">
-          <IconButton><Bell className="w-4 h-4" /></IconButton>
-          <IconButton><Settings className="w-4 h-4" /></IconButton>
-          <button className="w-8 h-8 rounded flex items-center justify-center text-black font-bold text-xs bg-[#ebd8c3]">
+          <IconButton
+            onClick={() => setActiveTab("terminal")}
+            title={`${approaching.filter((s) => s.distancePct < 5).length} imminent signals`}
+            badge={approaching.filter((s) => s.distancePct < 5).length}
+          >
+            <Bell className="w-4 h-4" />
+          </IconButton>
+          <IconButton
+            onClick={() => setActiveTab("risk")}
+            title="Risk Engine & Settings"
+            active={activeTab === "risk"}
+          >
+            <Settings className="w-4 h-4" />
+          </IconButton>
+          <button
+            className="w-8 h-8 rounded flex items-center justify-center text-black font-bold text-xs bg-[#ebd8c3] transition-opacity hover:opacity-80"
+            onClick={() => setActiveTab("analytics")}
+            title="Account & Portfolio"
+          >
             <User className="w-4 h-4" />
           </button>
         </div>
@@ -511,7 +527,7 @@ export default function App() {
               {sidebarTab === "execute" && <ExecutePanel approaching={approaching} signals={signals} positions={positions} />}
               {sidebarTab === "portfolio" && <PortfolioPanel positions={positions} history={history} account={account} />}
               {sidebarTab === "slippage" && <SlippagePanel history={history} />}
-              {sidebarTab === "riskguard" && <RiskGuardPanel positions={positions} approaching={approaching} account={account} botSettings={botSettings} />}
+              {sidebarTab === "riskguard" && <RiskGuardPanel positions={positions} approaching={approaching} account={account} botSettings={botSettings} updateSettings={updateSettings} watchlist={watchlist} fetchAll={fetchAll} />}
             </section>
 
             <aside className="w-80 flex flex-col p-4 overflow-y-auto" style={{ background: "var(--bg-main)" }}>
@@ -646,6 +662,14 @@ export default function App() {
             history={history}
             status={status}
             isOnline={isOnline}
+            onClearSignals={async () => {
+              if (!confirm("Clear all signals from the feed?")) return;
+              try {
+                const res = await fetch("/api/signals/clear", { method: "POST" });
+                if (res.ok) { setSignals([]); fetchAll(); }
+              } catch {}
+            }}
+            onRefresh={fetchAll}
           />
         )}
       </main>
@@ -877,7 +901,23 @@ function SlippagePanel({ history }: { history: TradeHistory[] }) {
   );
 }
 
-function RiskGuardPanel({ positions, approaching, account, botSettings }: { positions: Position[]; approaching: ApproachingSignal[]; account: Account | null; botSettings: BotSettings | null }) {
+function RiskGuardPanel({ positions, approaching, account, botSettings, updateSettings, watchlist, fetchAll }: { positions: Position[]; approaching: ApproachingSignal[]; account: Account | null; botSettings: BotSettings | null; updateSettings: (patch: Partial<BotSettings>) => Promise<void>; watchlist: WatchlistItem[]; fetchAll: () => Promise<void> }) {
+  const [newSymbol, setNewSymbol] = useState("");
+  const addSymbol = async () => {
+    const sym = newSymbol.trim().toUpperCase();
+    if (!sym) return;
+    try {
+      await fetch("/api/watchlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: sym }) });
+      setNewSymbol("");
+      fetchAll();
+    } catch {}
+  };
+  const removeSymbol = async (sym: string) => {
+    try {
+      await fetch(`/api/watchlist/${encodeURIComponent(sym)}`, { method: "DELETE" });
+      fetchAll();
+    } catch {}
+  };
   const equity = account?.equity || 1;
   const totalExposure = positions.reduce((s, p) => s + Math.abs(p.market_value), 0);
   const exposurePct = (totalExposure / equity) * 100;
@@ -934,14 +974,80 @@ function RiskGuardPanel({ positions, approaching, account, botSettings }: { posi
         </div>
 
         <div className="rounded-md border p-4" style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
-          <div className="text-[10px] uppercase tracking-wider font-semibold mb-3" style={{ color: "var(--text-muted)" }}>Enabled Patterns</div>
+          <div className="text-[10px] uppercase tracking-wider font-semibold mb-3" style={{ color: "var(--text-muted)" }}>Pattern Toggles</div>
           <div className="flex flex-wrap gap-2">
-            {(botSettings?.enabled_patterns || ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"]).map((p) => (
-              <span key={p} className="px-2 py-1 rounded border text-[10px]" style={{ background: "var(--accent-green-dim)", color: "var(--accent-green)", borderColor: "#166534" }}>
-                {p}
-              </span>
-            ))}
+            {(["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"] as const).map((p) => {
+              const isEnabled = botSettings?.enabled_patterns?.includes(p) ?? true;
+              return (
+                <button
+                  key={p}
+                  onClick={() => {
+                    if (!botSettings) return;
+                    const next = isEnabled
+                      ? botSettings.enabled_patterns.filter((x) => x !== p)
+                      : [...botSettings.enabled_patterns, p];
+                    if (next.length > 0) updateSettings({ enabled_patterns: next });
+                  }}
+                  className="px-2.5 py-1 rounded border text-[10px] transition-colors cursor-pointer"
+                  style={isEnabled
+                    ? { background: "var(--accent-green-dim)", color: "var(--accent-green)", borderColor: "#166534" }
+                    : { background: "var(--bg-panel)", color: "var(--text-muted)", borderColor: "var(--border-color)" }
+                  }
+                >
+                  {p}
+                </button>
+              );
+            })}
           </div>
+        </div>
+
+        {/* Watchlist Manager */}
+        <div className="rounded-md border p-4" style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Eye className="w-4 h-4" style={{ color: "var(--accent-amber)" }} />
+            <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>Watchlist Manager</span>
+            <span className="text-[10px] ml-auto" style={{ color: "var(--text-muted)" }}>{watchlist.length} symbols</span>
+          </div>
+          <div className="flex gap-2 mb-3">
+            <input
+              type="text"
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addSymbol()}
+              placeholder="Add symbol (e.g. NVDA, SOL/USD)"
+              className="flex-1 rounded-lg px-3 py-2 text-xs focus:outline-none"
+              style={{ background: "var(--bg-main)", border: "1px solid var(--border-color)", color: "var(--text-main)" }}
+            />
+            <button
+              onClick={addSymbol}
+              className="rounded-lg px-3 py-2 text-xs font-medium flex items-center gap-1 transition-colors"
+              style={{ background: "rgba(205,166,97,0.1)", color: "var(--accent-amber)", border: "1px solid rgba(205,166,97,0.2)" }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
+          </div>
+          {watchlist.length === 0 ? (
+            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>No symbols in watchlist</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {watchlist.map((w) => (
+                <div key={w.symbol} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] border" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: w.assetClass === "crypto" ? "var(--accent-amber)" : "var(--accent-green)" }} />
+                  <span className="font-medium text-white">{w.symbol}</span>
+                  <button
+                    onClick={() => removeSymbol(w.symbol)}
+                    className="ml-0.5 transition-colors"
+                    style={{ color: "var(--text-muted)" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent-red)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+                  >
+                    <XCircle className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -1256,12 +1362,14 @@ function RiskEnginePage({ riskData, positions, account, botSettings, approaching
   );
 }
 
-function LogsPage({ signals, approaching, history, status, isOnline }: {
+function LogsPage({ signals, approaching, history, status, isOnline, onClearSignals, onRefresh }: {
   signals: Signal[];
   approaching: ApproachingSignal[];
   history: TradeHistory[];
   status: Status | null;
   isOnline: boolean;
+  onClearSignals: () => Promise<void>;
+  onRefresh: () => Promise<void>;
 }) {
   const allEvents = useMemo(() => {
     const events: { time: string; type: string; message: string; level: "info" | "success" | "warn" | "error" }[] = [];
@@ -1309,6 +1417,28 @@ function LogsPage({ signals, approaching, history, status, isOnline }: {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-white uppercase tracking-wider">System Logs</h2>
         <div className="flex items-center gap-4">
+          <button
+            onClick={onRefresh}
+            className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded border transition-colors"
+            style={{ background: "var(--bg-panel)", color: "var(--text-muted)", borderColor: "var(--border-color)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent-green)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+            title="Refresh"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Refresh
+          </button>
+          <button
+            onClick={onClearSignals}
+            className="flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded border transition-colors"
+            style={{ background: "var(--bg-panel)", color: "var(--text-muted)", borderColor: "var(--border-color)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent-red)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+            title="Clear all signals"
+          >
+            <XCircle className="w-3 h-3" />
+            Clear Signals
+          </button>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full" style={{ background: isOnline ? "#22c55e" : "#ef4444", boxShadow: isOnline ? "0 0 5px rgba(34,197,94,0.8)" : undefined }} />
             <span className="text-[10px] uppercase tracking-wider" style={{ color: isOnline ? "var(--accent-green)" : "var(--accent-red)" }}>
@@ -1365,15 +1495,26 @@ function LogsPage({ signals, approaching, history, status, isOnline }: {
   );
 }
 
-function IconButton({ children }: { children: React.ReactNode }) {
+function IconButton({ children, onClick, title, badge, active }: { children: React.ReactNode; onClick?: () => void; title?: string; badge?: number; active?: boolean }) {
   return (
     <button
-      className="w-8 h-8 rounded flex items-center justify-center border transition-colors"
-      style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)", color: "var(--text-muted)" }}
+      className="w-8 h-8 rounded flex items-center justify-center border transition-colors relative"
+      style={{
+        background: active ? "var(--accent-green-dim)" : "var(--bg-panel)",
+        borderColor: active ? "#166534" : "var(--border-color)",
+        color: active ? "var(--accent-green)" : "var(--text-muted)",
+      }}
+      onClick={onClick}
+      title={title}
       onMouseEnter={(e) => (e.currentTarget.style.color = "#fff")}
-      onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+      onMouseLeave={(e) => (e.currentTarget.style.color = active ? "var(--accent-green)" : "var(--text-muted)")}
     >
       {children}
+      {badge !== undefined && badge > 0 && (
+        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center text-white" style={{ background: "var(--accent-red)" }}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
