@@ -516,6 +516,14 @@ router.post("/watchlist", async (req, res) => {
       .values({ symbol: clean, assetClass: cls })
       .onConflictDoNothing();
 
+    // Initialize scan state for the new symbol so it gets picked up next cycle
+    try {
+      const { initializeScanStates } = await import("./scan-scheduler");
+      await initializeScanStates([clean], ["1D", "4H"] as const);
+    } catch (err) {
+      console.error("[API] Failed to init scan state for new symbol:", err);
+    }
+
     console.log(`[API] Watchlist: added ${clean} (${cls})`);
     res.json({ ok: true, symbol: clean, asset_class: cls });
   } catch (err) {
@@ -748,6 +756,21 @@ router.post("/fix-exits/:id", async (req, res) => {
   } catch (err) {
     console.error("[API] fix-exits failed:", err);
     res.status(500).json({ error: "Failed to fix exits" });
+  }
+});
+
+/**
+ * GET /api/scan-state — Tiered scanner stats for the dashboard.
+ * Shows phase distribution, hot symbols, and scheduling info.
+ */
+router.get("/scan-state", async (_req, res) => {
+  try {
+    const { getScanStateStats } = await import("./scan-scheduler");
+    const stats = await getScanStateStats();
+    res.json(stats);
+  } catch (err) {
+    console.error("[API] Failed to fetch scan state:", err);
+    res.status(500).json({ error: "Failed to fetch scan state" });
   }
 });
 
