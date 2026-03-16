@@ -522,12 +522,25 @@ export async function runExitCycle(): Promise<void> {
         getOrder(signal.tp2OrderId),
       ]);
 
-      // ---- Both TPs filled: mark closed ----
+      // ---- Both TPs filled: mark closed with realized P&L ----
       if (tp1?.status === "filled" && tp2?.status === "filled") {
         console.log(`[ExitManager] Both TPs HIT: ${signal.symbol} #${signal.id}`);
+
+        // Compute realized P&L from TP fill prices
+        const entryPrice = Number(signal.filledAvgPrice || signal.entryPrice);
+        const tp1Qty = Number(tp1.filled_qty || tp1.qty);
+        const tp1Price = Number(tp1.filled_avg_price);
+        const tp2Qty = Number(tp2.filled_qty || tp2.qty);
+        const tp2Price = Number(tp2.filled_avg_price);
+        const totalQty = tp1Qty + tp2Qty;
+        const avgExitPrice = totalQty > 0 ? (tp1Qty * tp1Price + tp2Qty * tp2Price) / totalQty : 0;
+        const realizedPnl = signal.direction === "long"
+          ? (avgExitPrice - entryPrice) * totalQty
+          : (entryPrice - avgExitPrice) * totalQty;
+
         await db
           .update(liveSignals)
-          .set({ status: "closed" })
+          .set({ status: "closed", realizedPnl: String(realizedPnl) })
           .where(eq(liveSignals.id, signal.id));
         continue;
       }
@@ -542,12 +555,24 @@ export async function runExitCycle(): Promise<void> {
         continue;
       }
 
-      // ---- TP2 filled after partial_exit: mark closed ----
+      // ---- TP2 filled after partial_exit: mark closed with realized P&L ----
       if (tp2?.status === "filled" && signal.status === "partial_exit") {
         console.log(`[ExitManager] TP2 HIT: ${signal.symbol} #${signal.id} — fully closed`);
+
+        const entryPrice = Number(signal.filledAvgPrice || signal.entryPrice);
+        const tp1Qty = tp1 ? Number(tp1.filled_qty || tp1.qty) : 0;
+        const tp1Price = tp1?.filled_avg_price ? Number(tp1.filled_avg_price) : 0;
+        const tp2Qty = Number(tp2.filled_qty || tp2.qty);
+        const tp2Price = Number(tp2.filled_avg_price);
+        const totalQty = tp1Qty + tp2Qty;
+        const avgExitPrice = totalQty > 0 ? (tp1Qty * tp1Price + tp2Qty * tp2Price) / totalQty : 0;
+        const realizedPnl = signal.direction === "long"
+          ? (avgExitPrice - entryPrice) * totalQty
+          : (entryPrice - avgExitPrice) * totalQty;
+
         await db
           .update(liveSignals)
-          .set({ status: "closed" })
+          .set({ status: "closed", realizedPnl: String(realizedPnl) })
           .where(eq(liveSignals.id, signal.id));
         continue;
       }
@@ -607,11 +632,19 @@ export async function runExitCycle(): Promise<void> {
           `order=${slOrder.id} qty=${remainingQty}`,
         );
 
+        // Compute realized P&L: entry from signal, exit ≈ currentPrice (market order)
+        const entryPrice = Number(signal.filledAvgPrice || signal.entryPrice);
+        const exitPrice = currentPrice; // best approximation for market order
+        const realizedPnl = signal.direction === "long"
+          ? (exitPrice - entryPrice) * remainingQty
+          : (entryPrice - exitPrice) * remainingQty;
+
         await db
           .update(liveSignals)
           .set({
             status: "closed",
             slOrderId: slOrder.id,
+            realizedPnl: String(realizedPnl),
           })
           .where(eq(liveSignals.id, signal.id));
       } catch (err) {

@@ -6,7 +6,7 @@
 import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
@@ -323,6 +323,55 @@ router.get("/history", async (_req, res) => {
 });
 
 /**
+ * GET /api/trades — Closed signals with realized P&L and trade outcomes.
+ * Sourced from live_signals (not Alpaca order history) so data survives purges.
+ */
+router.get("/trades", async (_req, res) => {
+  try {
+    const closed = await db
+      .select()
+      .from(liveSignals)
+      .where(eq(liveSignals.status, "closed"))
+      .orderBy(desc(liveSignals.executedAt))
+      .limit(30);
+
+    const trades = closed.map((s) => {
+      const entryPrice = Number(s.filledAvgPrice || s.entryPrice);
+      const qty = Number(s.filledQty || 0);
+      const pnl = s.realizedPnl != null ? Number(s.realizedPnl) : null;
+      const pnlPct = pnl != null && entryPrice > 0 && qty > 0
+        ? Math.round((pnl / (entryPrice * qty)) * 10000) / 100
+        : null;
+      const result = pnl != null
+        ? (pnl > 0 ? "win" : pnl < 0 ? "loss" : "break_even")
+        : null;
+
+      return {
+        signal_id: s.id,
+        symbol: s.symbol,
+        pattern: s.patternType,
+        direction: s.direction,
+        timeframe: s.timeframe,
+        entry_price: entryPrice,
+        exit_price: pnl != null && qty > 0
+          ? (s.direction === "long" ? entryPrice + pnl / qty : entryPrice - pnl / qty)
+          : Number(s.tp1Price),
+        qty,
+        pnl,
+        pnl_pct: pnlPct,
+        result,
+        closed_at: s.executedAt,
+      };
+    });
+
+    res.json(trades);
+  } catch (err) {
+    console.error("[API] Failed to fetch trades:", err);
+    res.status(500).json({ error: "Failed to fetch trades" });
+  }
+});
+
+/**
  * GET /api/orders — All open Alpaca orders enriched with signal data.
  */
 router.get("/orders", async (_req, res) => {
@@ -506,6 +555,7 @@ router.get("/settings", async (_req, res) => {
         equity_allocation: 0.05,
         crypto_allocation: 0.07,
         enabled_patterns: ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"],
+        go_live_target: 15,
       });
     }
     const s = rows[0];
@@ -514,6 +564,7 @@ router.get("/settings", async (_req, res) => {
       equity_allocation: Number(s.equityAllocation),
       crypto_allocation: Number(s.cryptoAllocation),
       enabled_patterns: s.enabledPatterns as string[],
+      go_live_target: s.goLiveTarget ?? 15,
     });
   } catch (err) {
     console.error("[API] Failed to fetch settings:", err);
@@ -531,6 +582,7 @@ router.post("/settings", async (req, res) => {
       equity_allocation?: number;
       crypto_allocation?: number;
       enabled_patterns?: string[];
+      go_live_target?: number;
     };
 
     const updates: Record<string, unknown> = {};
@@ -548,6 +600,9 @@ router.post("/settings", async (req, res) => {
       const ALL_PATTERNS = ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"];
       const valid = body.enabled_patterns.filter((p) => ALL_PATTERNS.includes(p));
       updates.enabledPatterns = valid;
+    }
+    if (typeof body.go_live_target === "number" && body.go_live_target > 0 && body.go_live_target <= 100) {
+      updates.goLiveTarget = body.go_live_target;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -594,7 +649,7 @@ router.get("/approaching", async (_req, res) => {
     const pending = await db
       .select()
       .from(liveSignals)
-      .where(eq(liveSignals.status, "pending"))
+      .where(inArray(liveSignals.status, ["pending", "paper_only"]))
       .orderBy(desc(liveSignals.createdAt));
 
     const enriched = pending
@@ -615,12 +670,10 @@ router.get("/approaching", async (_req, res) => {
 
         // hasOrder / blocked / rr enrichment
         const hasOrder = !!s.entryOrderId;
-        const isCrypto = s.symbol.includes("/");
-        const isCryptoShort = isCrypto && s.direction === "short";
         const ageMs = s.createdAt ? Date.now() - new Date(s.createdAt).getTime() : 0;
-        const blocked = isCryptoShort
-          ? "Crypto SHORT — Alpaca long-only"
-          : (!hasOrder && !isCryptoShort && ageMs > 2 * 60 * 1000)
+        const blocked = s.status === "paper_only"
+          ? "Paper only — crypto SHORT (no Alpaca order)"
+          : (!hasOrder && s.status === "pending" && ageMs > 2 * 60 * 1000)
             ? "No order — possible buying power issue"
             : null;
         const reward = Math.abs(Number(s.tp1Price) - entry);
@@ -649,6 +702,7 @@ router.get("/approaching", async (_req, res) => {
           hasOrder,
           blocked,
           rr,
+          paperOnly: s.status === "paper_only",
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 50)

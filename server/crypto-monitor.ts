@@ -188,11 +188,18 @@ export async function runCryptoMonitor(): Promise<void> {
           await cancelAllOrdersForSymbol(pos.symbol);
           const safeQty = formatAlpacaQty(posQty, isCrypto);
           await closePosition(pos.symbol, String(safeQty));
+
+          // Compute realized P&L
+          const entryPrice = Number(freshSignal.filledAvgPrice || freshSignal.entryPrice);
+          const slRealizedPnl = isLong
+            ? (currentPrice - entryPrice) * posQty
+            : (entryPrice - currentPrice) * posQty;
+
           await db
             .update(liveSignals)
-            .set({ status: "closed" })
+            .set({ status: "closed", realizedPnl: String(slRealizedPnl) })
             .where(eq(liveSignals.id, freshSignal.id));
-          console.log(`[PositionMonitor] Position closed and signal #${freshSignal.id} marked closed`);
+          console.log(`[PositionMonitor] Position closed and signal #${freshSignal.id} marked closed (P&L: ${slRealizedPnl.toFixed(2)})`);
         } catch (err) {
           console.error(`[PositionMonitor] Failed to close SL position ${pos.symbol}:`, err);
           sendError(`PositionMonitor SL close failed: ${pos.symbol}`, err).catch(() => {});
@@ -240,11 +247,20 @@ export async function runCryptoMonitor(): Promise<void> {
             await cancelAllOrdersForSymbol(pos.symbol);
             const safeQty = formatAlpacaQty(posQty, isCrypto);
             await closePosition(pos.symbol, String(safeQty));
+
+            // Compute realized P&L for the full trade
+            // TP1 closed ~50% at tp1, TP2 closes remaining at currentPrice (≈ tp2)
+            const entryPriceTp2 = Number(freshSignal.filledAvgPrice || freshSignal.entryPrice);
+            const filledQty = Number(freshSignal.filledQty || posQty);
+            const tp2RealizedPnl = isLong
+              ? (currentPrice - entryPriceTp2) * filledQty
+              : (entryPriceTp2 - currentPrice) * filledQty;
+
             await db
               .update(liveSignals)
-              .set({ status: "closed" })
+              .set({ status: "closed", realizedPnl: String(tp2RealizedPnl) })
               .where(eq(liveSignals.id, freshSignal.id));
-            console.log(`[PositionMonitor] Remaining closed, signal #${freshSignal.id} → closed`);
+            console.log(`[PositionMonitor] Remaining closed, signal #${freshSignal.id} → closed (P&L: ${tp2RealizedPnl.toFixed(2)})`);
           } catch (err) {
             console.error(`[PositionMonitor] Failed to close TP2 position ${pos.symbol}:`, err);
             sendError(`PositionMonitor TP2 close failed: ${pos.symbol}`, err).catch(() => {});

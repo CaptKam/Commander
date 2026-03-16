@@ -77,6 +77,10 @@ export async function ensureTablesExist(): Promise<void> {
     await db.execute(sql.raw(
       `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS exit_retries INTEGER NOT NULL DEFAULT 0`
     ));
+    // realized P&L — persisted so it survives Alpaca order history purges
+    await db.execute(sql.raw(
+      `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS realized_pnl NUMERIC(20,10)`
+    ));
     console.log("[DB] Table live_signals: OK");
 
     await db.execute(sql`
@@ -139,6 +143,9 @@ export async function ensureTablesExist(): Promise<void> {
         enabled_patterns JSONB NOT NULL DEFAULT '["Gartley","Bat","Alt Bat","Butterfly","ABCD"]'::jsonb
       )
     `);
+    await db.execute(sql.raw(
+      `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS go_live_target INTEGER NOT NULL DEFAULT 15`
+    ));
     await db.execute(sql`
       INSERT INTO system_settings (id) VALUES (1)
       ON CONFLICT (id) DO NOTHING

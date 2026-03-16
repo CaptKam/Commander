@@ -39,6 +39,7 @@ export const liveSignals = pgTable("live_signals", {
   slOrderId: text("sl_order_id"),
   filledQty: numeric("filled_qty", { precision: 20, scale: 10 }),
   filledAvgPrice: numeric("filled_avg_price", { precision: 20, scale: 10 }),
+  realizedPnl: numeric("realized_pnl", { precision: 20, scale: 10 }),
   exitRetries: integer("exit_retries").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   executedAt: timestamp("executed_at"),
@@ -100,6 +101,7 @@ export const systemSettings = pgTable("system_settings", {
   equityAllocation: numeric("equity_allocation", { precision: 5, scale: 4 }).notNull().default("0.05"),
   cryptoAllocation: numeric("crypto_allocation", { precision: 5, scale: 4 }).notNull().default("0.07"),
   enabledPatterns: jsonb("enabled_patterns").notNull().default(["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"]),
+  goLiveTarget: integer("go_live_target").notNull().default(15),
 });
 
 export type SystemSettings = typeof systemSettings.$inferSelect;

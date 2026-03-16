@@ -378,7 +378,7 @@ async function runScanCycle(): Promise<void> {
               eq(liveSignals.timeframe, signal.timeframe),
               eq(liveSignals.patternType, signal.pattern),
               eq(liveSignals.direction, signal.direction),
-              inArray(liveSignals.status, ["pending", "filled", "partial_exit"]),
+              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "paper_only"]),
               gte(liveSignals.createdAt, timeWindow),
             ),
           )
@@ -395,15 +395,6 @@ async function runScanCycle(): Promise<void> {
       }
 
       const isCrypto = signal.symbol.includes("/");
-
-      // ---- Early reject: crypto SHORTs can never execute on Alpaca ----
-      if (isCrypto && signal.direction === "short") {
-        console.log(
-          `[Orchestrator] Skipping crypto SHORT — cannot execute on Alpaca: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
-        );
-        markSignalSent(signal);
-        continue;
-      }
 
       try {
         // ---- Zod validation (Anti-NULL Rule: CLAUDE.md Rule #2) ----
@@ -443,7 +434,13 @@ async function runScanCycle(): Promise<void> {
         markSignalSent(signal);
 
         // ---- Place limit order on Alpaca (only if equity was fetched AND trading enabled) ----
-        if (!settings.tradingEnabled) {
+        if (isCrypto && signal.direction === "short") {
+          // Crypto SHORTs: save for paper trading validation but no Alpaca order
+          console.log(
+            `[Orchestrator] Crypto SHORT tracked as paper_only (no Alpaca order): ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
+          );
+          await db.update(liveSignals).set({ status: "paper_only" }).where(eq(liveSignals.id, inserted.id));
+        } else if (!settings.tradingEnabled) {
           console.log(
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
           );
@@ -600,12 +597,12 @@ async function cancelStaleGtcOrders(): Promise<void> {
         );
         cancelledCount++;
 
-        // Step 3: Update matching live_signals row to "expired"
+        // Step 3: Update matching live_signals row to "expired" (only pending — not paper_only)
         try {
           await db
             .update(liveSignals)
             .set({ status: "expired" })
-            .where(eq(liveSignals.entryOrderId, order.id));
+            .where(and(eq(liveSignals.entryOrderId, order.id), eq(liveSignals.status, "pending")));
         } catch (dbErr) {
           console.error(`[Orchestrator] Failed to update signal status for cancelled order ${order.id}:`, dbErr);
         }
