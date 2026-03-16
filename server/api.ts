@@ -323,6 +323,55 @@ router.get("/history", async (_req, res) => {
 });
 
 /**
+ * GET /api/trades — Closed signals with realized P&L and trade outcomes.
+ * Sourced from live_signals (not Alpaca order history) so data survives purges.
+ */
+router.get("/trades", async (_req, res) => {
+  try {
+    const closed = await db
+      .select()
+      .from(liveSignals)
+      .where(eq(liveSignals.status, "closed"))
+      .orderBy(desc(liveSignals.executedAt))
+      .limit(30);
+
+    const trades = closed.map((s) => {
+      const entryPrice = Number(s.filledAvgPrice || s.entryPrice);
+      const qty = Number(s.filledQty || 0);
+      const pnl = s.realizedPnl != null ? Number(s.realizedPnl) : null;
+      const pnlPct = pnl != null && entryPrice > 0 && qty > 0
+        ? Math.round((pnl / (entryPrice * qty)) * 10000) / 100
+        : null;
+      const result = pnl != null
+        ? (pnl > 0 ? "win" : pnl < 0 ? "loss" : "break_even")
+        : null;
+
+      return {
+        signal_id: s.id,
+        symbol: s.symbol,
+        pattern: s.patternType,
+        direction: s.direction,
+        timeframe: s.timeframe,
+        entry_price: entryPrice,
+        exit_price: pnl != null && qty > 0
+          ? (s.direction === "long" ? entryPrice + pnl / qty : entryPrice - pnl / qty)
+          : Number(s.tp1Price),
+        qty,
+        pnl,
+        pnl_pct: pnlPct,
+        result,
+        closed_at: s.executedAt,
+      };
+    });
+
+    res.json(trades);
+  } catch (err) {
+    console.error("[API] Failed to fetch trades:", err);
+    res.status(500).json({ error: "Failed to fetch trades" });
+  }
+});
+
+/**
  * GET /api/orders — All open Alpaca orders enriched with signal data.
  */
 router.get("/orders", async (_req, res) => {
