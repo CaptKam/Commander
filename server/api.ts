@@ -382,6 +382,47 @@ router.get("/orders", async (_req, res) => {
   }
 });
 
+/**
+ * DELETE /api/orders/:id — Cancel a specific Alpaca order and expire its signal.
+ */
+router.delete("/orders/:id", async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const headers = alpacaHeaders();
+    if (!headers) {
+      return res.status(500).json({ error: "Alpaca keys not configured" });
+    }
+
+    const r = await fetch(`${ALPACA_BASE_URL}/v2/orders/${orderId}`, {
+      method: "DELETE",
+      headers,
+    });
+
+    // 204/200 = cancelled, 404/422 = already gone — all OK
+    if (!r.ok && r.status !== 404 && r.status !== 422) {
+      const body = await r.text();
+      console.error(`[API] Failed to cancel order ${orderId}: ${r.status} — ${body}`);
+      return res.status(r.status).json({ error: body });
+    }
+
+    // Update matching signal to expired
+    try {
+      await db
+        .update(liveSignals)
+        .set({ status: "expired" })
+        .where(eq(liveSignals.entryOrderId, orderId));
+    } catch (dbErr) {
+      console.error(`[API] Failed to update signal for cancelled order ${orderId}:`, dbErr);
+    }
+
+    console.log(`[API] Cancelled order ${orderId}`);
+    res.json({ ok: true, cancelled: orderId });
+  } catch (err) {
+    console.error("[API] Failed to cancel order:", err);
+    res.status(500).json({ error: "Failed to cancel order" });
+  }
+});
+
 // ============================================================
 // Watchlist CRUD
 // ============================================================
