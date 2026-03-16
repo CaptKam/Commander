@@ -10,7 +10,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
-import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen } from "./orchestrator";
+import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen, pipelineStats } from "./orchestrator";
 
 const router = Router();
 
@@ -749,6 +749,19 @@ router.post("/fix-exits/:id", async (req, res) => {
     console.error("[API] fix-exits failed:", err);
     res.status(500).json({ error: "Failed to fix exits" });
   }
+});
+
+/**
+ * GET /api/pipeline — Live scan pipeline stats for the dashboard.
+ */
+router.get("/pipeline", (_req, res) => {
+  res.json({
+    ...pipelineStats,
+    lastUpdatedAgo: pipelineStats.lastUpdated > 0
+      ? Math.floor((Date.now() - pipelineStats.lastUpdated) / 1000)
+      : null,
+    websocket: getStreamStatus(),
+  });
 });
 
 /**

@@ -93,6 +93,29 @@ interface BotSettings {
   enabled_patterns: string[];
 }
 
+interface PipelineData {
+  lastUpdatedAgo: number | null;
+  symbolsScanned: number;
+  cryptoCount: number;
+  equityCount: number;
+  marketOpen: boolean;
+  rawCandidates: number;
+  qualityPassed: number;
+  qualityRejected: number;
+  screenerPassed: number;
+  dedupSkipped: number;
+  newSignalsSaved: number;
+  ordersPlaced: number;
+  ordersSkipped: number;
+  paperOnlyCount: number;
+  exitCycleRan: boolean;
+  pendingFills: number;
+  filledPositions: number;
+  partialExits: number;
+  closedTrades: number;
+  websocket: { crypto: string; stock: string; priceCount: number };
+}
+
 interface TradeHistory {
   symbol: string;
   side: string;
@@ -155,13 +178,14 @@ export default function App() {
   const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
   const [history, setHistory] = useState<TradeHistory[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [pipeline, setPipeline] = useState<PipelineData | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes, pipeRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -172,6 +196,7 @@ export default function App() {
           fetch("/api/settings").then((r) => r.json()),
           fetch("/api/history").then((r) => r.json()),
           fetch("/api/watchlist").then((r) => r.json()),
+          fetch("/api/pipeline").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value)) setPositions(posRes.value);
@@ -182,6 +207,7 @@ export default function App() {
       if (setRes.status === "fulfilled" && setRes.value && !setRes.value.error) setBotSettings(setRes.value);
       if (histRes.status === "fulfilled" && Array.isArray(histRes.value)) setHistory(histRes.value);
       if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value)) setWatchlist(wlRes.value);
+      if (pipeRes.status === "fulfilled") setPipeline(pipeRes.value);
     } catch {
     } finally {
       setLoading(false);
@@ -474,8 +500,9 @@ export default function App() {
             </div>
           </div>
 
-          {/* LIVE FEED */}
-          <div className="shrink-0 flex flex-col" style={{ height: "40%" }}>
+          {/* SCAN PIPELINE + LIVE FEED */}
+          <div className="shrink-0 flex flex-col overflow-y-auto" style={{ height: "40%" }}>
+            <ScanPipeline data={pipeline} />
             <div className="shrink-0 flex items-center justify-between px-3 h-7 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
               <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
                 Live Feed
@@ -640,6 +667,296 @@ export default function App() {
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Scan Pipeline
+// ============================================================
+function ScanPipeline({ data }: { data: PipelineData | null }) {
+  const [openSteps, setOpenSteps] = useState<Set<number>>(new Set([1]));
+
+  if (!data) {
+    return (
+      <div className="rounded-md border p-6 text-center mb-6"
+        style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
+        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+          Waiting for first scan cycle...
+        </span>
+      </div>
+    );
+  }
+  const toggle = (step: number) => {
+    setOpenSteps(prev => {
+      const next = new Set(prev);
+      if (next.has(step)) next.delete(step);
+      else next.add(step);
+      return next;
+    });
+  };
+  const isOpen = (step: number) => openSteps.has(step);
+  const steps = [
+    {
+      num: 1,
+      name: "Determine what to scan",
+      tag: data.lastUpdatedAgo !== null ? `${data.lastUpdatedAgo}s ago` : "waiting",
+      active: true,
+      content: (
+        <div>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <PipeMetric label="Symbols" value={String(data.symbolsScanned)} sub={`${data.cryptoCount} crypto · ${data.equityCount} equity`} />
+            <PipeMetric label="Market" value={data.marketOpen ? "Open" : "Closed"} color={data.marketOpen ? "var(--accent-green)" : "var(--text-muted)"} />
+            <PipeMetric label="Timeframes" value="1D + 4H" sub="Both scanned each cycle" />
+          </div>
+          <PipeBullet text={data.marketOpen
+            ? `All ${data.symbolsScanned} symbols scanned (market open)`
+            : `${data.cryptoCount} crypto scanned (equities skipped — market closed)`} />
+        </div>
+      ),
+    },
+    {
+      num: 2,
+      name: "Fetch candle data",
+      tag: "alpaca-data.ts",
+      active: true,
+      content: (
+        <div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <PipeMetric label="1-Day candles" value="365 days" sub="Cached 2 hours" />
+            <PipeMetric label="4-Hour candles" value="90 days" sub="Cached 5 minutes" />
+          </div>
+          <PipeBullet text="Crypto and stocks batched into separate API calls" />
+          <PipeBullet text="Rate limiter: 200 req/min (Alpaca free tier)" />
+          <PipeBullet text="Paginated up to 15 pages per request" />
+        </div>
+      ),
+    },
+    {
+      num: 3,
+      name: "Detect harmonic patterns",
+      tag: "patterns.ts",
+      active: data.rawCandidates > 0,
+      content: (
+        <div>
+          <PipeMetric label="Raw candidates this cycle" value={String(data.rawCandidates)} />
+          <div className="mt-3 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
+            <div className="text-[10px] font-semibold mb-2" style={{ color: "var(--text-muted)" }}>MODE 1 — FORMING (PHASE C)</div>
+            <div className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              5-bar pivot detection → 40 recent pivots → test X-A-B-C groups against 5 patterns (Gartley, Bat, Alt Bat, Butterfly, ABCD) → project D → limit order at projected price
+            </div>
+          </div>
+          <div className="mt-2 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
+            <div className="text-[10px] font-semibold mb-2" style={{ color: "var(--text-muted)" }}>MODE 2 — COMPLETED</div>
+            <div className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              All 5 pivots confirmed (X,A,B,C,D) → validates XAD ratio → 3% slippage check → market order if current price near D
+            </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      num: 4,
+      name: "Quality filtering (7 rules)",
+      tag: "quality-filters.ts",
+      active: data.rawCandidates > 0,
+      content: (
+        <div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <PipeMetric label="Passed" value={String(data.qualityPassed)} color="var(--accent-green)" />
+            <PipeMetric label="Rejected" value={String(data.qualityRejected)} color="var(--accent-red)" />
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+            <span>R1 · XB ratio 0.2 – 1.0</span>
+            <span>R5 · Profit target ≥ 2.0%</span>
+            <span>R2 · XD within pattern bounds</span>
+            <span>R6 · Fib proximity ≤ 15%</span>
+            <span>R3 · AC ratio 0.2 – 1.0</span>
+            <span>R7 · Pattern age in window</span>
+            <span>R4 · R:R ≥ 1.0</span>
+          </div>
+          {data.rawCandidates > 0 && (
+            <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
+              <span>{data.rawCandidates} candidates</span>
+              <span style={{ color: "var(--accent-green)" }}>→</span>
+              <span style={{ color: "var(--accent-green)" }}>{data.qualityPassed} passed</span>
+              <span>·</span>
+              <span style={{ color: "var(--accent-red)" }}>{data.qualityRejected} rejected</span>
+              <span>·</span>
+              <span>{data.rawCandidates > 0 ? Math.round((data.qualityPassed / data.rawCandidates) * 100) : 0}% pass rate</span>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      num: 5,
+      name: "Phase C screening",
+      tag: "screener.ts",
+      active: data.qualityPassed > 0,
+      content: (
+        <div>
+          <PipeMetric label="Passed screener" value={String(data.screenerPassed)} />
+          <PipeBullet text="Blocks Crab and Deep Crab (globally disabled — low win rates)" />
+          <PipeBullet text="Checks against your enabled_patterns from settings" />
+        </div>
+      ),
+    },
+    {
+      num: 6,
+      name: "Deduplication (2 layers)",
+      tag: "orchestrator.ts",
+      active: data.dedupSkipped > 0 || data.screenerPassed > 0,
+      content: (
+        <div>
+          {data.dedupSkipped > 0 && (
+            <PipeMetric label="Skipped as duplicates" value={String(data.dedupSkipped)} color="var(--accent-amber)" />
+          )}
+          <div className="mt-2 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
+            <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>LAYER 1 — IN-MEMORY CACHE</div>
+            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Key: symbol:timeframe:pattern:direction · TTL: 4 hours</div>
+          </div>
+          <div className="mt-2 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
+            <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>LAYER 2 — DATABASE CHECK</div>
+            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Window: 14 days for 1D, 7 days for 4H · Survives restarts</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      num: 7,
+      name: "Save and execute",
+      tag: "orchestrator.ts → alpaca.ts",
+      active: data.newSignalsSaved > 0,
+      content: (
+        <div>
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            <PipeMetric label="Saved" value={String(data.newSignalsSaved)} color="var(--accent-green)" />
+            <PipeMetric label="Orders placed" value={String(data.ordersPlaced)} color="var(--accent-green)" />
+            <PipeMetric label="Orders skipped" value={String(data.ordersSkipped)} color="var(--accent-amber)" />
+            <PipeMetric label="Paper only" value={String(data.paperOnlyCount)} />
+          </div>
+          <PipeBullet text="Zod validates all fields → Telegram alert → DB insert → Alpaca order" />
+          <PipeBullet text="Position sizing: 5% equity for stocks, 7% for crypto" />
+          <PipeBullet text="Skips if notional exceeds available buying power" />
+          {data.paperOnlyCount > 0 && (
+            <PipeBullet text={`${data.paperOnlyCount} crypto SHORT signal(s) tracked as paper_only — no Alpaca order`} />
+          )}
+        </div>
+      ),
+    },
+    {
+      num: 8,
+      name: "Exit cycle",
+      tag: "exit-manager.ts · crypto-monitor.ts",
+      active: data.exitCycleRan,
+      content: (
+        <div>
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            <PipeMetric label="Pending fills" value={String(data.pendingFills)} />
+            <PipeMetric label="In trade" value={String(data.filledPositions)} color="var(--accent-green)" />
+            <PipeMetric label="Partial exit" value={String(data.partialExits)} color="var(--accent-amber)" />
+            <PipeMetric label="Closed" value={String(data.closedTrades)} />
+          </div>
+          <div className="flex items-center gap-2 text-[10px] mb-3" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+            <span>pending</span>
+            <span style={{ color: "var(--accent-green)" }}>→</span>
+            <span style={{ color: "var(--accent-green)" }}>filled</span>
+            <span style={{ color: "var(--accent-green)" }}>→</span>
+            <span style={{ color: "var(--accent-amber)" }}>partial_exit</span>
+            <span style={{ color: "var(--accent-green)" }}>→</span>
+            <span style={{ color: "var(--accent-green)" }}>closed</span>
+          </div>
+          <PipeBullet text="Phase A: Poll Alpaca for entry fills → place TP1 + TP2 exits" />
+          <PipeBullet text="Phase B: Monitor TP1/TP2 order fills → partial_exit → closed" />
+          <PipeBullet text="Phase C: Software SL via WebSocket prices → market exit if breached" />
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <PipeMetric label="WebSocket crypto" value={data.websocket?.crypto ?? "—"} color={data.websocket?.crypto === "connected" ? "var(--accent-green)" : "var(--accent-amber)"} />
+            <PipeMetric label="WebSocket stocks" value={data.websocket?.stock ?? "—"} color={data.websocket?.stock === "connected" ? "var(--accent-green)" : "var(--accent-amber)"} />
+          </div>
+        </div>
+      ),
+    },
+  ];
+  return (
+    <div className="rounded-md border mb-4 mx-3 mt-2" style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
+      <div className="px-4 py-3 border-b flex justify-between items-center" style={{ borderColor: "var(--border-color)" }}>
+        <h3 className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
+          Scan pipeline
+        </h3>
+        <span className="text-[10px]" style={{ color: "var(--accent-green)", fontFamily: "'JetBrains Mono', monospace" }}>
+          {data.lastUpdatedAgo !== null ? `Updated ${data.lastUpdatedAgo}s ago` : "Waiting..."}
+        </span>
+      </div>
+      <div className="p-4">
+        {steps.map((step, i) => (
+          <div key={step.num} className="flex gap-3" style={{ paddingBottom: i < steps.length - 1 ? 4 : 0 }}>
+            {/* Vertical line + dot */}
+            <div className="flex flex-col items-center" style={{ width: 28 }}>
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 border cursor-pointer"
+                style={{
+                  background: step.active ? "var(--accent-green-dim)" : "var(--bg-panel)",
+                  borderColor: step.active ? "#166534" : "var(--border-color)",
+                  color: step.active ? "var(--accent-green)" : "var(--text-muted)",
+                }}
+                onClick={() => toggle(step.num)}
+              >
+                {step.num}
+              </div>
+              {i < steps.length - 1 && (
+                <div className="flex-1" style={{ width: 1, background: "var(--border-color)", minHeight: 16 }} />
+              )}
+            </div>
+            {/* Content */}
+            <div className="flex-1" style={{ paddingBottom: i < steps.length - 1 ? 12 : 0 }}>
+              <div
+                className="flex items-center gap-2 cursor-pointer"
+                onClick={() => toggle(step.num)}
+                style={{ marginTop: 3 }}
+              >
+                <span className="text-xs font-semibold" style={{ color: isOpen(step.num) ? "var(--accent-green)" : "var(--text-main)" }}>
+                  {step.name}
+                </span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{
+                  background: "var(--bg-main)",
+                  color: "var(--text-muted)",
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  {step.tag}
+                </span>
+                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                  {isOpen(step.num) ? "▾" : "▸"}
+                </span>
+              </div>
+              {isOpen(step.num) && (
+                <div className="mt-3 mb-2">
+                  {step.content}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PipeMetric({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+  return (
+    <div className="rounded-md p-2" style={{ background: "var(--bg-main)", border: "0.5px solid var(--border-color)" }}>
+      <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{label}</div>
+      <div className="text-sm font-bold" style={{ color: color || "white", fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      {sub && <div className="text-[8px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sub}</div>}
+    </div>
+  );
+}
+
+function PipeBullet({ text }: { text: string }) {
+  return (
+    <div className="flex items-start gap-2 py-1">
+      <div className="w-1 h-1 rounded-full mt-1.5 shrink-0" style={{ background: "var(--text-muted)" }} />
+      <span className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{text}</span>
     </div>
   );
 }

@@ -155,6 +155,34 @@ export let lastScanPassedFilter: number = 0;
 export { scanCount as totalScanCount };
 
 // ============================================================
+// Pipeline Stats — exported for GET /api/pipeline
+// Tracks each step of the scan cycle for the dashboard view.
+// Ephemeral (resets on restart) — not trade state.
+// ============================================================
+export let pipelineStats = {
+  lastUpdated: 0,
+  symbolsScanned: 0,
+  cryptoCount: 0,
+  equityCount: 0,
+  marketOpen: false,
+  timeframes: ["1D", "4H"] as string[],
+  rawCandidates: 0,
+  qualityPassed: 0,
+  qualityRejected: 0,
+  screenerPassed: 0,
+  dedupSkipped: 0,
+  newSignalsSaved: 0,
+  ordersPlaced: 0,
+  ordersSkipped: 0,
+  paperOnlyCount: 0,
+  exitCycleRan: false,
+  pendingFills: 0,
+  filledPositions: 0,
+  partialExits: 0,
+  closedTrades: 0,
+};
+
+// ============================================================
 // Sent Signals Cache — prevents re-processing the same forming
 // pattern every scan cycle while the candle is still open.
 // Key: "symbol:timeframe:pattern:direction", Value: expiry timestamp.
@@ -245,6 +273,24 @@ async function runScanCycle(): Promise<void> {
       );
     }
 
+    // Pipeline stats: Step 1 — what we're scanning
+    try {
+      pipelineStats.symbolsScanned = symbolsToScan.length;
+      pipelineStats.cryptoCount = cryptoSymbols.length;
+      pipelineStats.equityCount = includeEquities ? equitySymbols.length : 0;
+      pipelineStats.marketOpen = marketOpen;
+      // Reset per-cycle counters
+      pipelineStats.rawCandidates = 0;
+      pipelineStats.qualityPassed = 0;
+      pipelineStats.qualityRejected = 0;
+      pipelineStats.screenerPassed = 0;
+      pipelineStats.dedupSkipped = 0;
+      pipelineStats.newSignalsSaved = 0;
+      pipelineStats.ordersPlaced = 0;
+      pipelineStats.ordersSkipped = 0;
+      pipelineStats.paperOnlyCount = 0;
+    } catch {}
+
     console.log(
       `[Orchestrator] Scan #${scanCount}: Market ${marketOpen ? "OPEN" : "CLOSED"} — ` +
         `scanning ${symbolsToScan.length}/${activeSymbols.length} symbols ` +
@@ -302,6 +348,9 @@ async function runScanCycle(): Promise<void> {
 
     lastScanCandidates = candidates.length;
 
+    // Pipeline stats: Step 3 — raw candidates
+    try { pipelineStats.rawCandidates = candidates.length; } catch {}
+
     console.log(
       `[Orchestrator] Scan #${scanCount}: ${candidates.length} raw candidates found`,
     );
@@ -322,10 +371,19 @@ async function runScanCycle(): Promise<void> {
     const qualityPassed = validateSignalQuality(candidates);
     lastScanPassedFilter = qualityPassed.length;
 
+    // Pipeline stats: Step 4 — quality filter results
+    try {
+      pipelineStats.qualityPassed = qualityPassed.length;
+      pipelineStats.qualityRejected = candidates.length - qualityPassed.length;
+    } catch {}
+
     // ============================================================
     // Step 3: Filter through Phase C screener (kills Crab/Deep Crab)
     // ============================================================
     const validSignals = await processPhaseCSignals(qualityPassed, settings.enabledPatterns);
+
+    // Pipeline stats: Step 5 — screener results
+    try { pipelineStats.screenerPassed = validSignals.length; } catch {}
 
     if (validSignals.length === 0) {
       const elapsed = Date.now() - cycleStart;
@@ -360,6 +418,7 @@ async function runScanCycle(): Promise<void> {
         console.log(
           `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (in-memory cache)`,
         );
+        try { pipelineStats.dedupSkipped++; } catch {}
         continue;
       }
 
@@ -388,6 +447,7 @@ async function runScanCycle(): Promise<void> {
           console.log(
             `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (exists in DB within age window)`,
           );
+          try { pipelineStats.dedupSkipped++; } catch {}
           continue;
         }
       } catch (err) {
@@ -429,6 +489,7 @@ async function runScanCycle(): Promise<void> {
         console.log(
           `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern} (id=${inserted.id})`,
         );
+        try { pipelineStats.newSignalsSaved++; } catch {}
 
         // Mark in-memory cache AFTER successful DB insert (not before)
         markSignalSent(signal);
@@ -440,10 +501,12 @@ async function runScanCycle(): Promise<void> {
             `[Orchestrator] Crypto SHORT tracked as paper_only (no Alpaca order): ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
           );
           await db.update(liveSignals).set({ status: "paper_only" }).where(eq(liveSignals.id, inserted.id));
+          try { pipelineStats.paperOnlyCount++; } catch {}
         } else if (!settings.tradingEnabled) {
           console.log(
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
           );
+          try { pipelineStats.ordersSkipped++; } catch {}
         } else if (equity !== null) {
           // Pre-check: skip if order notional exceeds available buying power
           // This prevents 403 spam when GTC orders have locked up most cash
@@ -454,6 +517,7 @@ async function runScanCycle(): Promise<void> {
               `[Orchestrator] Skipping order for ${signal.symbol}: notional $${notional.toFixed(2)} ` +
               `exceeds available buying power $${buyingPower.toFixed(2)}`,
             );
+            try { pipelineStats.ordersSkipped++; } catch {}
           } else {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
               equity: settings.equityAllocation,
@@ -464,11 +528,13 @@ async function runScanCycle(): Promise<void> {
               .update(liveSignals)
               .set({ entryOrderId: order.id })
               .where(eq(liveSignals.id, inserted.id));
+            try { pipelineStats.ordersPlaced++; } catch {}
           }
         } else {
           console.warn(
             `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
           );
+          try { pipelineStats.ordersSkipped++; } catch {}
         }
       } catch (err) {
         console.error(
@@ -518,6 +584,23 @@ async function runScanCycle(): Promise<void> {
       await cancelStaleGtcOrders();
     } catch (err) {
       console.error("[Orchestrator] Stale GTC cleanup failed:", err);
+    }
+
+    // ---- Pipeline stats: final status counts from DB ----
+    try {
+      pipelineStats.exitCycleRan = true;
+      const allActive = await db
+        .select({ status: liveSignals.status })
+        .from(liveSignals)
+        .where(inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "paper_only"]));
+      pipelineStats.pendingFills = allActive.filter((r) => r.status === "pending" || r.status === "paper_only").length;
+      pipelineStats.filledPositions = allActive.filter((r) => r.status === "filled").length;
+      pipelineStats.partialExits = allActive.filter((r) => r.status === "partial_exit").length;
+      pipelineStats.closedTrades = allActive.filter((r) => r.status === "closed").length;
+      pipelineStats.lastUpdated = Date.now();
+    } catch (err) {
+      console.error("[Orchestrator] Pipeline stats query failed (non-fatal):", err);
+      pipelineStats.lastUpdated = Date.now();
     }
 
     // ALWAYS release the lock, even if the scan threw
