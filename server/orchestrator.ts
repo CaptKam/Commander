@@ -18,6 +18,7 @@ import { runCryptoMonitor } from "./crypto-monitor";
 import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
 import { startPriceStreams, stopPriceStreams } from "./websocket-stream";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
+import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
 import { and, eq, gte, inArray } from "drizzle-orm";
@@ -499,8 +500,111 @@ async function runScanCycle(): Promise<void> {
       console.error("[Orchestrator] Position monitor failed:", err);
     }
 
+    // ---- Stale GTC Cleanup: cancel orders older than 7 days ----
+    try {
+      await cancelStaleGtcOrders();
+    } catch (err) {
+      console.error("[Orchestrator] Stale GTC cleanup failed:", err);
+    }
+
     // ALWAYS release the lock, even if the scan threw
     isScanning = false;
+  }
+}
+
+// ============================================================
+// Stale GTC Order Cleanup — cancels orders older than 7 days
+// ============================================================
+const STALE_GTC_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+async function cancelStaleGtcOrders(): Promise<void> {
+  const ALPACA_API_KEY = process.env.ALPACA_API_KEY;
+  const ALPACA_API_SECRET = process.env.ALPACA_API_SECRET;
+  const ALPACA_BASE_URL = (process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets").replace(/\/v2\/?$/, "");
+
+  if (!ALPACA_API_KEY || !ALPACA_API_SECRET) {
+    console.warn("[Orchestrator] Skipping stale GTC cleanup — Alpaca keys not set");
+    return;
+  }
+
+  try {
+    // Step 1: Fetch all open orders
+    checkTradingRateLimit();
+    const res = await fetch(`${ALPACA_BASE_URL}/v2/orders?status=open&limit=200`, {
+      headers: {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`[Orchestrator] Failed to fetch open orders for stale GTC cleanup: ${res.status} — ${body}`);
+      return;
+    }
+
+    const orders = (await res.json()) as Array<{
+      id: string;
+      symbol: string;
+      side: string;
+      time_in_force: string;
+      created_at: string;
+    }>;
+
+    const now = Date.now();
+    let cancelledCount = 0;
+
+    for (const order of orders) {
+      if (order.time_in_force !== "gtc") continue;
+
+      const ageMs = now - new Date(order.created_at).getTime();
+      if (ageMs < STALE_GTC_AGE_MS) continue;
+
+      const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+
+      try {
+        // Step 2: Cancel the stale order
+        checkTradingRateLimit();
+        const cancelRes = await fetch(`${ALPACA_BASE_URL}/v2/orders/${order.id}`, {
+          method: "DELETE",
+          headers: {
+            "APCA-API-KEY-ID": ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+          },
+        });
+
+        if (!cancelRes.ok && cancelRes.status !== 404) {
+          const body = await cancelRes.text();
+          console.error(`[Orchestrator] Failed to cancel stale order ${order.id}: ${cancelRes.status} — ${body}`);
+          continue;
+        }
+
+        console.log(
+          `[Orchestrator] Cancelled stale GTC order: ${order.symbol} ${order.side} age=${ageDays}d orderId=${order.id}`,
+        );
+        cancelledCount++;
+
+        // Step 3: Update matching live_signals row to "expired"
+        try {
+          await db
+            .update(liveSignals)
+            .set({ status: "expired" })
+            .where(eq(liveSignals.entryOrderId, order.id));
+        } catch (dbErr) {
+          console.error(`[Orchestrator] Failed to update signal status for cancelled order ${order.id}:`, dbErr);
+        }
+      } catch (err) {
+        // Rate limit exhausted or network error — stop cancelling, try next cycle
+        console.error(`[Orchestrator] Error cancelling stale order ${order.id}:`, err);
+        break;
+      }
+    }
+
+    if (cancelledCount > 0) {
+      console.log(`[Orchestrator] Stale GTC cleanup: cancelled ${cancelledCount} order(s)`);
+    }
+  } catch (err) {
+    console.error("[Orchestrator] Stale GTC cleanup failed:", err);
   }
 }
 
