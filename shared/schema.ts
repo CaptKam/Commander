@@ -101,6 +101,7 @@ export const systemSettings = pgTable("system_settings", {
   equityAllocation: numeric("equity_allocation", { precision: 5, scale: 4 }).notNull().default("0.05"),
   cryptoAllocation: numeric("crypto_allocation", { precision: 5, scale: 4 }).notNull().default("0.07"),
   enabledPatterns: jsonb("enabled_patterns").notNull().default(["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"]),
+  goLiveTarget: integer("go_live_target").notNull().default(15),
 });
 
 export type SystemSettings = typeof systemSettings.$inferSelect;

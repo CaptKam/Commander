@@ -143,6 +143,9 @@ export async function ensureTablesExist(): Promise<void> {
         enabled_patterns JSONB NOT NULL DEFAULT '["Gartley","Bat","Alt Bat","Butterfly","ABCD"]'::jsonb
       )
     `);
+    await db.execute(sql.raw(
+      `ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS go_live_target INTEGER NOT NULL DEFAULT 15`
+    ));
     await db.execute(sql`
       INSERT INTO system_settings (id) VALUES (1)
       ON CONFLICT (id) DO NOTHING

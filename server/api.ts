@@ -506,6 +506,7 @@ router.get("/settings", async (_req, res) => {
         equity_allocation: 0.05,
         crypto_allocation: 0.07,
         enabled_patterns: ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"],
+        go_live_target: 15,
       });
     }
     const s = rows[0];
@@ -514,6 +515,7 @@ router.get("/settings", async (_req, res) => {
       equity_allocation: Number(s.equityAllocation),
       crypto_allocation: Number(s.cryptoAllocation),
       enabled_patterns: s.enabledPatterns as string[],
+      go_live_target: s.goLiveTarget ?? 15,
     });
   } catch (err) {
     console.error("[API] Failed to fetch settings:", err);
@@ -531,6 +533,7 @@ router.post("/settings", async (req, res) => {
       equity_allocation?: number;
       crypto_allocation?: number;
       enabled_patterns?: string[];
+      go_live_target?: number;
     };
 
     const updates: Record<string, unknown> = {};
@@ -548,6 +551,9 @@ router.post("/settings", async (req, res) => {
       const ALL_PATTERNS = ["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"];
       const valid = body.enabled_patterns.filter((p) => ALL_PATTERNS.includes(p));
       updates.enabledPatterns = valid;
+    }
+    if (typeof body.go_live_target === "number" && body.go_live_target > 0 && body.go_live_target <= 100) {
+      updates.goLiveTarget = body.go_live_target;
     }
 
     if (Object.keys(updates).length === 0) {
