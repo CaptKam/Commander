@@ -4,8 +4,6 @@ import {
   Power,
   XCircle,
   Plus,
-  Eye,
-  EyeOff,
   Zap,
 } from "lucide-react";
 
@@ -125,14 +123,6 @@ function fmt(n: number): string {
   const abs = Math.abs(n);
   const d = abs === 0 ? 2 : abs < 0.001 ? 8 : abs < 0.1 ? 6 : abs < 1 ? 4 : 2;
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: d, maximumFractionDigits: d });
-}
-
-function fmtCompact(n: number): string {
-  const abs = Math.abs(n);
-  const sign = n < 0 ? "-" : n > 0 ? "+" : "";
-  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(1)}K`;
-  return `${sign}$${abs.toFixed(2)}`;
 }
 
 function ts(iso: string): string {
@@ -558,7 +548,7 @@ export default function App() {
             <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
             <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
             <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
-            <Row label="Profit Factor" value={metrics ? (metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
+            <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
             <Row label="Trades" value={String(history.length)} />
             <Row label="Signals" value={String(signals.length)} />
             <Row label="Approaching" value={String(approaching.filter((s) => s.distancePct <= 5).length)} color="var(--accent-amber)" />
