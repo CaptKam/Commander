@@ -151,6 +151,30 @@ export async function ensureTablesExist(): Promise<void> {
       ON CONFLICT (id) DO NOTHING
     `);
     console.log("[DB] Table system_settings: OK");
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS symbol_scan_state (
+        id SERIAL PRIMARY KEY,
+        symbol VARCHAR(20) NOT NULL,
+        timeframe VARCHAR(5) NOT NULL,
+        phase VARCHAR(20) NOT NULL DEFAULT 'NO_PATTERN',
+        best_pattern VARCHAR(20),
+        best_direction VARCHAR(10),
+        x_price NUMERIC(20,10),
+        a_price NUMERIC(20,10),
+        b_price NUMERIC(20,10),
+        c_price NUMERIC(20,10),
+        projected_d NUMERIC(20,10),
+        distance_to_d_pct NUMERIC(10,4),
+        last_scanned_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        next_scan_due TIMESTAMP DEFAULT NOW() NOT NULL,
+        scan_interval_ms INTEGER NOT NULL DEFAULT 28800000,
+        pivot_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+        UNIQUE(symbol, timeframe)
+      )
+    `);
+    console.log("[DB] Table symbol_scan_state: OK");
   } catch (err) {
     console.error("[DB] Failed to ensure tables exist:", err);
   }

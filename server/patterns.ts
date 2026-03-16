@@ -517,3 +517,199 @@ export function detectCompletedPatterns(
 
   return signals;
 }
+
+// ============================================================
+// Pattern Phase Detection — for tiered scanner scheduling
+// Determines the deepest harmonic formation phase for a symbol.
+// Does NOT generate signals — purely for scan interval decisions.
+// ============================================================
+
+export type PatternPhase = "NO_PATTERN" | "XA_FORMING" | "AB_FORMING" | "BC_FORMING" | "CD_PROJECTED" | "D_APPROACHING";
+
+export interface PatternPhaseResult {
+  phase: PatternPhase;
+  bestPattern: string | null;
+  bestDirection: string | null;
+  pivotCount: number;
+  xPrice: number | null;
+  aPrice: number | null;
+  bPrice: number | null;
+  cPrice: number | null;
+  projectedD: number | null;
+  distanceToDPct: number | null;
+}
+
+const PHASE_DEPTH: Record<PatternPhase, number> = {
+  NO_PATTERN: 0,
+  XA_FORMING: 1,
+  AB_FORMING: 2,
+  BC_FORMING: 3,
+  CD_PROJECTED: 4,
+  D_APPROACHING: 5,
+};
+
+/**
+ * Detects the deepest harmonic formation phase across all pattern
+ * definitions, for a given symbol's candle data. Used by the tiered
+ * scanner to decide how frequently to re-scan each symbol.
+ *
+ * Fast path — no quality filters, no screener, no signal generation.
+ * No console.log — called thousands of times per cycle.
+ */
+export function detectPatternPhase(
+  candles: Candle[],
+  symbol: string,
+  timeframe: "1D" | "4H",
+): PatternPhaseResult {
+  const empty: PatternPhaseResult = {
+    phase: "NO_PATTERN",
+    bestPattern: null,
+    bestDirection: null,
+    pivotCount: 0,
+    xPrice: null,
+    aPrice: null,
+    bPrice: null,
+    cPrice: null,
+    projectedD: null,
+    distanceToDPct: null,
+  };
+
+  const pivots = findPivots(candles);
+  empty.pivotCount = pivots.length;
+
+  if (pivots.length < 2) {
+    return empty;
+  }
+
+  const recentPivots = pivots.slice(-40);
+  const lastClose = candles[candles.length - 1].close;
+
+  let deepest: PatternPhaseResult = { ...empty };
+
+  // Track the best fib deviation for tie-breaking same-depth matches
+  let bestFibDeviation = Infinity;
+
+  for (let xi = 0; xi < recentPivots.length - 1; xi++) {
+    const X = recentPivots[xi];
+    const A = recentPivots[xi + 1];
+
+    // Must alternate high/low
+    if (X.type === A.type) continue;
+
+    // Minimum XA leg size
+    const xaSize = Math.abs(X.price - A.price);
+    const midPrice = (X.price + A.price) / 2;
+    if (midPrice <= 0 || xaSize / midPrice < MIN_XA_LEG_PCT) continue;
+
+    // At minimum we have an XA pair
+    if (PHASE_DEPTH.XA_FORMING > PHASE_DEPTH[deepest.phase]) {
+      deepest = {
+        ...empty,
+        phase: "XA_FORMING",
+        xPrice: X.price,
+        aPrice: A.price,
+      };
+      bestFibDeviation = Infinity;
+    }
+
+    // Need B to go further
+    if (xi + 2 >= recentPivots.length) continue;
+    const B = recentPivots[xi + 2];
+    if (A.type === B.type) continue;
+
+    const xabRatio = calcRetrace(X.price, A.price, B.price);
+
+    // Check if XAB ratio matches ANY pattern
+    let anyXabMatch = false;
+    for (const pat of PATTERN_DEFS) {
+      if (ratioInRange(xabRatio, pat.xab.min, pat.xab.max, RATIO_TOLERANCE)) {
+        anyXabMatch = true;
+        break;
+      }
+    }
+    if (!anyXabMatch) continue;
+
+    if (PHASE_DEPTH.AB_FORMING > PHASE_DEPTH[deepest.phase]) {
+      deepest = {
+        ...empty,
+        phase: "AB_FORMING",
+        xPrice: X.price,
+        aPrice: A.price,
+        bPrice: B.price,
+      };
+      bestFibDeviation = Infinity;
+    }
+
+    // Need C to go further
+    if (xi + 3 >= recentPivots.length) continue;
+    const C = recentPivots[xi + 3];
+    if (B.type === C.type) continue;
+
+    const abcRatio = calcRetrace(A.price, B.price, C.price);
+
+    // Check if BOTH XAB and ABC match some pattern
+    for (const pat of PATTERN_DEFS) {
+      if (
+        !ratioInRange(xabRatio, pat.xab.min, pat.xab.max, RATIO_TOLERANCE) ||
+        !ratioInRange(abcRatio, pat.abc.min, pat.abc.max, RATIO_TOLERANCE)
+      ) {
+        continue;
+      }
+
+      // Both ratios match this pattern — at least BC_FORMING
+      const direction: Direction = A.type === 1 ? "long" : "short";
+
+      // Fib deviation for tie-breaking: how close are the ratios to ideal?
+      const xabMid = (pat.xab.min + pat.xab.max) / 2;
+      const abcMid = (pat.abc.min + pat.abc.max) / 2;
+      const fibDev = Math.abs(xabRatio - xabMid) + Math.abs(abcRatio - abcMid);
+
+      // Project D
+      const xaLeg = X.price - A.price;
+      const midXAD = (pat.xad.min + pat.xad.max) / 2;
+      const projD = A.price + xaLeg * midXAD;
+
+      if (!Number.isFinite(projD) || projD <= 0) continue;
+
+      // Check if D has already been hit
+      const dAlreadyHit = direction === "long"
+        ? lastClose <= projD
+        : lastClose >= projD;
+
+      if (dAlreadyHit) continue;
+
+      // Distance to D
+      const distPct = Math.abs(lastClose - projD) / lastClose * 100;
+
+      // Determine phase
+      let candidatePhase: PatternPhase;
+      if (distPct <= 5) {
+        candidatePhase = "D_APPROACHING";
+      } else {
+        candidatePhase = "CD_PROJECTED";
+      }
+
+      // Update deepest if this is deeper, or same depth with closer fib ratios
+      if (
+        PHASE_DEPTH[candidatePhase] > PHASE_DEPTH[deepest.phase] ||
+        (PHASE_DEPTH[candidatePhase] === PHASE_DEPTH[deepest.phase] && fibDev < bestFibDeviation)
+      ) {
+        deepest = {
+          phase: candidatePhase,
+          bestPattern: pat.name,
+          bestDirection: direction,
+          pivotCount: pivots.length,
+          xPrice: X.price,
+          aPrice: A.price,
+          bPrice: B.price,
+          cPrice: C.price,
+          projectedD: projD,
+          distanceToDPct: Math.round(distPct * 100) / 100,
+        };
+        bestFibDeviation = fibDev;
+      }
+    }
+  }
+
+  return deepest;
+}
