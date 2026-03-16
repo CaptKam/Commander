@@ -105,3 +105,34 @@ export const systemSettings = pgTable("system_settings", {
 });
 
 export type SystemSettings = typeof systemSettings.$inferSelect;
+
+// ============================================================
+// Symbol Scan State — Tiered scanner scheduling per symbol+timeframe
+// Unique constraint on (symbol, timeframe) enforced via DB index in db.ts
+// ============================================================
+export const symbolScanState = pgTable("symbol_scan_state", {
+  id: serial("id").primaryKey(),
+  symbol: varchar("symbol", { length: 20 }).notNull(),
+  timeframe: varchar("timeframe", { length: 5 }).notNull(), // "1D" or "4H"
+  phase: varchar("phase", { length: 20 }).notNull().default("NO_PATTERN"),
+  // Best pattern match info (if any forming pattern detected)
+  bestPattern: varchar("best_pattern", { length: 20 }),   // "Gartley", "Bat", etc. or null
+  bestDirection: varchar("best_direction", { length: 10 }), // "long", "short", or null
+  // Pivot prices for the best match (null if not yet detected)
+  xPrice: numeric("x_price", { precision: 20, scale: 10 }),
+  aPrice: numeric("a_price", { precision: 20, scale: 10 }),
+  bPrice: numeric("b_price", { precision: 20, scale: 10 }),
+  cPrice: numeric("c_price", { precision: 20, scale: 10 }),
+  projectedD: numeric("projected_d", { precision: 20, scale: 10 }),
+  distanceToDPct: numeric("distance_to_d_pct", { precision: 10, scale: 4 }),
+  // Scheduling
+  lastScannedAt: timestamp("last_scanned_at").defaultNow().notNull(),
+  nextScanDue: timestamp("next_scan_due").defaultNow().notNull(),
+  scanIntervalMs: integer("scan_interval_ms").notNull().default(28800000), // 8 hours default
+  // Metadata
+  pivotCount: integer("pivot_count").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type SymbolScanState = typeof symbolScanState.$inferSelect;
+export type InsertSymbolScanState = typeof symbolScanState.$inferInsert;
