@@ -8,8 +8,9 @@ import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
-import { getStreamPrice } from "./websocket-stream";
+import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
+import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen } from "./orchestrator";
 
 const router = Router();
 
@@ -572,6 +573,13 @@ router.get("/status", (_req, res) => {
     uptime: process.uptime(),
     cache: cacheStats,
     timestamp: new Date().toISOString(),
+    scan_count: totalScanCount,
+    last_scan_age_seconds: lastScanTimestamp > 0 ? Math.floor((Date.now() - lastScanTimestamp) / 1000) : null,
+    last_scan_candidates: lastScanCandidates,
+    last_scan_passed_filter: lastScanPassedFilter,
+    filter_pass_rate: lastScanCandidates > 0 ? Math.round((lastScanPassedFilter / lastScanCandidates) * 100) : 0,
+    websocket: getStreamStatus(),
+    market_open: isStockMarketOpen(),
   });
 });
 
