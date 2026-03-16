@@ -80,7 +80,7 @@ interface Status {
 
 interface Metrics {
   win_rate: number;
-  profit_factor: number;
+  profit_factor: number | null;
   total_trades: number;
   wins: number;
   losses: number;
@@ -447,7 +447,7 @@ export default function App() {
                     <div className="text-2xl font-bold text-white font-mono">{formatUsd(positions[0].current_price)}</div>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-xs font-mono" style={{ color: positions[0].unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                        {positions[0].unrealized_pl >= 0 ? "+" : ""}{positions[0].unrealized_pl_pct.toFixed(2)}%
+                        {positions[0].unrealized_pl >= 0 ? "+" : ""}{(positions[0].unrealized_pl_pct ?? 0).toFixed(2)}%
                       </span>
                       <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{positions.length} pos</span>
                     </div>
@@ -539,7 +539,7 @@ export default function App() {
                 </h2>
                 <div className="grid grid-cols-2 gap-3 mb-6">
                   <MetricBox label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} />
-                  <MetricBox label="Profit Factor" value={metrics ? (metrics.profit_factor === Infinity ? "INF" : String(metrics.profit_factor)) : "—"} />
+                  <MetricBox label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : String(metrics.profit_factor)) : "—"} />
                 </div>
 
                 {botSettings && (
@@ -747,7 +747,7 @@ function ExecutePanel({ approaching, signals, positions }: { approaching: Approa
                 </div>
                 <div className="text-right">
                   <span className="font-mono text-sm font-semibold" style={{ color: p.unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                    {p.unrealized_pl >= 0 ? "+" : ""}{p.unrealized_pl_pct.toFixed(2)}%
+                    {p.unrealized_pl >= 0 ? "+" : ""}{(p.unrealized_pl_pct ?? 0).toFixed(2)}%
                   </span>
                 </div>
               </div>
@@ -788,7 +788,7 @@ function PortfolioPanel({ positions, history, account }: { positions: Position[]
               <div key={p.symbol} className="grid grid-cols-8 gap-2 px-4 py-2.5 border-b text-xs items-center" style={{ borderColor: "var(--border-color)" }}>
                 <div className="font-mono text-white font-semibold">{p.symbol}</div>
                 <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: p.side === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: p.side === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{p.side}</span></div>
-                <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{p.qty.toFixed(2)}</div>
+                <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{(p.qty ?? 0).toFixed(2)}</div>
                 <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{formatUsd(p.entry_price)}</div>
                 <div className="text-right font-mono text-white">{formatUsd(p.current_price)}</div>
                 <div className="text-right font-mono" style={{ color: "var(--accent-red)" }}>{p.stop_loss ? formatUsd(p.stop_loss) : "—"}</div>
@@ -822,7 +822,7 @@ function PortfolioPanel({ positions, history, account }: { positions: Position[]
               <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction || t.side}</span></div>
               <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.entry_price != null ? formatUsd(t.entry_price) : "—"}</div>
               <div className="text-right font-mono text-white">{formatUsd(t.filled_price)}</div>
-              <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.qty.toFixed(2)}</div>
+              <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{(t.qty ?? 0).toFixed(2)}</div>
               <div className="text-right text-[10px]" style={{ color: "var(--text-muted)" }}>{timeAgo(t.filled_at)}</div>
             </div>
           ))}
@@ -1085,7 +1085,7 @@ function AnalyticsPage({ history, signals, approaching, metrics, analyticsData, 
       <div className="grid grid-cols-5 gap-3">
         <StatCard label="Total Signals" value={String(totalSignals)} icon={<Zap className="w-4 h-4" />} color="var(--accent-amber)" />
         <StatCard label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} icon={<Target className="w-4 h-4" />} color="var(--accent-green)" />
-        <StatCard label="Profit Factor" value={metrics ? (metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} icon={<TrendingUp className="w-4 h-4" />} />
+        <StatCard label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} icon={<TrendingUp className="w-4 h-4" />} />
         <StatCard label="Total Trades" value={String(history.length)} icon={<BarChart3 className="w-4 h-4" />} />
         <StatCard label="Watchlist" value={`${watchlist.length}`} icon={<Eye className="w-4 h-4" />} />
       </div>
@@ -1194,7 +1194,7 @@ function AnalyticsPage({ history, signals, approaching, metrics, analyticsData, 
             <div><span className="px-1.5 py-0.5 rounded text-[9px] uppercase" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction || t.side}</span></div>
             <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.entry_price != null ? formatUsd(t.entry_price) : "—"}</div>
             <div className="text-right font-mono text-white">{formatUsd(t.filled_price)}</div>
-            <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{t.qty.toFixed(2)}</div>
+            <div className="text-right font-mono" style={{ color: "var(--text-main)" }}>{(t.qty ?? 0).toFixed(2)}</div>
             <div className="text-right font-mono" style={{ color: "var(--accent-red)" }}>{t.stop_loss != null ? formatUsd(t.stop_loss) : "—"}</div>
             <div className="text-right font-mono" style={{ color: "var(--accent-green)" }}>{t.tp1 != null ? formatUsd(t.tp1) : "—"}</div>
             <div className="text-right text-[10px]" style={{ color: "var(--text-muted)" }}>
@@ -1398,7 +1398,7 @@ function LogsPage({ signals, approaching, history, status, isOnline, onClearSign
       events.push({
         time: t.filled_at,
         type: "FILL",
-        message: `${(t.direction || t.side).toUpperCase()} ${t.symbol} ${t.pattern || "—"} filled ${t.qty.toFixed(2)} @ ${formatUsd(t.filled_price)}${t.entry_price != null ? ` (target: ${formatUsd(t.entry_price)})` : ""}`,
+        message: `${(t.direction || t.side).toUpperCase()} ${t.symbol} ${t.pattern || "—"} filled ${(t.qty ?? 0).toFixed(2)} @ ${formatUsd(t.filled_price)}${t.entry_price != null ? ` (target: ${formatUsd(t.entry_price)})` : ""}`,
         level: "success",
       });
     });
