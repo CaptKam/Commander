@@ -385,6 +385,15 @@ async function runScanCycle(): Promise<void> {
 
       const isCrypto = signal.symbol.includes("/");
 
+      // ---- Early reject: crypto SHORTs can never execute on Alpaca ----
+      if (isCrypto && signal.direction === "short") {
+        console.log(
+          `[Orchestrator] Skipping crypto SHORT — cannot execute on Alpaca: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
+        );
+        markSignalSent(signal);
+        continue;
+      }
+
       try {
         // ---- Zod validation (Anti-NULL Rule: CLAUDE.md Rule #2) ----
         const parsed = insertLiveSignalSchema.parse({
@@ -426,10 +435,6 @@ async function runScanCycle(): Promise<void> {
         if (!settings.tradingEnabled) {
           console.log(
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
-          );
-        } else if (isCrypto && signal.direction === "short") {
-          console.log(
-            `[Alpaca] Crypto SHORT signal saved but not traded — Alpaca does not support crypto shorting: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
           );
         } else if (equity !== null) {
           // Pre-check: skip if order notional exceeds available buying power
