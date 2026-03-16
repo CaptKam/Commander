@@ -5,7 +5,7 @@
 
 import { Router } from "express";
 import { db } from "./db";
-import { liveSignals, watchlist, systemSettings } from "../shared/schema";
+import { liveSignals, watchlist, systemSettings, symbolScanState } from "../shared/schema";
 import { desc, eq, inArray } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
@@ -771,6 +771,40 @@ router.get("/scan-state", async (_req, res) => {
   } catch (err) {
     console.error("[API] Failed to fetch scan state:", err);
     res.status(500).json({ error: "Failed to fetch scan state" });
+  }
+});
+
+/**
+ * GET /api/scan-state/full — Detailed scan state for every symbol × timeframe.
+ */
+router.get("/scan-state/full", async (_req, res) => {
+  try {
+    const rows = await db
+      .select()
+      .from(symbolScanState)
+      .orderBy(desc(symbolScanState.updatedAt));
+
+    res.json(rows.map(r => ({
+      symbol: r.symbol,
+      timeframe: r.timeframe,
+      phase: r.phase,
+      bestPattern: r.bestPattern,
+      bestDirection: r.bestDirection,
+      xPrice: r.xPrice ? Number(r.xPrice) : null,
+      aPrice: r.aPrice ? Number(r.aPrice) : null,
+      bPrice: r.bPrice ? Number(r.bPrice) : null,
+      cPrice: r.cPrice ? Number(r.cPrice) : null,
+      projectedD: r.projectedD ? Number(r.projectedD) : null,
+      distanceToDPct: r.distanceToDPct ? Number(r.distanceToDPct) : null,
+      pivotCount: r.pivotCount,
+      lastScannedAt: r.lastScannedAt,
+      nextScanDue: r.nextScanDue,
+      scanIntervalMs: r.scanIntervalMs,
+      isDue: new Date(r.nextScanDue) <= new Date(),
+    })));
+  } catch (err) {
+    console.error("[API] Failed to fetch full scan state:", err);
+    res.status(500).json({ error: "Failed to fetch full scan state" });
   }
 });
 
