@@ -87,6 +87,11 @@ export async function ensureTablesExist(): Promise<void> {
     `);
     // Fix any bare crypto tickers from previous seeds (e.g. "XRP" → "XRP/USD")
     // Also purge stale live_signals with bare symbols so they stop generating orders
+    // Also remove unsupported Alpaca crypto tickers
+    for (const unsupported of ["BNB/USD", "SUI/USD"]) {
+      await db.execute(sql.raw(`DELETE FROM watchlist WHERE symbol = '${unsupported}'`));
+      await db.execute(sql.raw(`DELETE FROM live_signals WHERE symbol = '${unsupported}' AND status = 'pending'`));
+    }
     for (const base of ["BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "AVAX", "LINK", "LTC", "SUI"]) {
       await db.execute(sql.raw(
         `DELETE FROM watchlist WHERE symbol = '${base}'`
@@ -105,12 +110,10 @@ export async function ensureTablesExist(): Promise<void> {
         ('SOL/USD', 'crypto'),
         ('XRP/USD', 'crypto'),
         ('DOGE/USD', 'crypto'),
-        ('BNB/USD', 'crypto'),
         ('ADA/USD', 'crypto'),
         ('AVAX/USD', 'crypto'),
         ('LINK/USD', 'crypto'),
         ('LTC/USD', 'crypto'),
-        ('SUI/USD', 'crypto'),
         ('AAPL', 'equity'),
         ('TSLA', 'equity'),
         ('NVDA', 'equity'),

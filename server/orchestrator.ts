@@ -431,15 +431,26 @@ async function runScanCycle(): Promise<void> {
             `[Alpaca] Crypto SHORT signal saved but not traded — Alpaca does not support crypto shorting: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
           );
         } else if (equity !== null) {
+          // Pre-check: skip if order notional exceeds available buying power
+          // This prevents 403 spam when GTC orders have locked up most cash
+          const allocation = isCrypto ? settings.cryptoAllocation : settings.equityAllocation;
+          const notional = equity * allocation;
+          if (buyingPower !== null && notional > buyingPower) {
+            console.warn(
+              `[Orchestrator] Skipping order for ${signal.symbol}: notional $${notional.toFixed(2)} ` +
+              `exceeds available buying power $${buyingPower.toFixed(2)}`,
+            );
+          } else {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
-            equity: settings.equityAllocation,
-            crypto: settings.cryptoAllocation,
-          }, buyingPower ?? undefined);
-          // Save the Alpaca order ID so exit-manager can track fills
-          await db
-            .update(liveSignals)
-            .set({ entryOrderId: order.id })
-            .where(eq(liveSignals.id, inserted.id));
+              equity: settings.equityAllocation,
+              crypto: settings.cryptoAllocation,
+            }, buyingPower ?? undefined);
+            // Save the Alpaca order ID so exit-manager can track fills
+            await db
+              .update(liveSignals)
+              .set({ entryOrderId: order.id })
+              .where(eq(liveSignals.id, inserted.id));
+          }
         } else {
           console.warn(
             `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
