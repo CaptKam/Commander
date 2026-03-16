@@ -230,7 +230,7 @@ export default function App() {
         time: t.filled_at,
         tag: "FILL",
         color: "var(--accent-green)",
-        text: `${t.direction.toUpperCase()} ${t.symbol} ${t.pattern} ${t.qty.toFixed(2)} @ ${fmt(t.filled_price)}`,
+        text: `${(t.direction ?? "").toUpperCase()} ${t.symbol} ${t.pattern ?? "?"} ${(t.qty ?? 0).toFixed(2)} @ ${fmt(t.filled_price)}`,
       });
     });
 
@@ -243,7 +243,7 @@ export default function App() {
         color: blocked ? "var(--accent-red)" : s.distancePct < 2 ? "var(--accent-amber)" : "var(--text-main)",
         text: blocked
           ? `${s.symbol} ${s.pattern} SHORT blocked — crypto shorts unsupported`
-          : `${s.direction.toUpperCase()} ${s.symbol} ${s.pattern} ${s.timeframe} — ${s.distancePct.toFixed(1)}% from D @ ${fmt(s.projectedD)}`,
+          : `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.pattern} ${s.timeframe} — ${(s.distancePct ?? 0).toFixed(1)}% from D @ ${fmt(s.projectedD)}`,
       });
     });
 
@@ -253,14 +253,14 @@ export default function App() {
           time: s.createdAt,
           tag: "CLOSED",
           color: "var(--text-muted)",
-          text: `${s.direction.toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} — ${s.status}`,
+          text: `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} — ${s.status}`,
         });
       } else {
         events.push({
           time: s.createdAt,
           tag: "SIGNAL",
           color: "var(--accent-amber)",
-          text: `${s.direction.toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} @ ${fmt(Number(s.entryPrice))} — ${s.status}`,
+          text: `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} @ ${fmt(Number(s.entryPrice))} — ${s.status}`,
         });
       }
     });
