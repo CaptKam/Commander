@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "LhjzrkGaqZPrI5twJpfS2"
+uri = "file://SYSTEM_BREAKDOWN.md"
+type = "text"
+title = "Pattern Bot v2 — Complete System Breakdown"
