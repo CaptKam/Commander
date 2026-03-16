@@ -597,12 +597,12 @@ async function cancelStaleGtcOrders(): Promise<void> {
         );
         cancelledCount++;
 
-        // Step 3: Update matching live_signals row to "expired"
+        // Step 3: Update matching live_signals row to "expired" (only pending — not paper_only)
         try {
           await db
             .update(liveSignals)
             .set({ status: "expired" })
-            .where(eq(liveSignals.entryOrderId, order.id));
+            .where(and(eq(liveSignals.entryOrderId, order.id), eq(liveSignals.status, "pending")));
         } catch (dbErr) {
           console.error(`[Orchestrator] Failed to update signal status for cancelled order ${order.id}:`, dbErr);
         }
