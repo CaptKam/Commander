@@ -670,12 +670,10 @@ router.get("/approaching", async (_req, res) => {
 
         // hasOrder / blocked / rr enrichment
         const hasOrder = !!s.entryOrderId;
-        const isCrypto = s.symbol.includes("/");
-        const isCryptoShort = isCrypto && s.direction === "short";
         const ageMs = s.createdAt ? Date.now() - new Date(s.createdAt).getTime() : 0;
-        const blocked = isCryptoShort
-          ? "Crypto SHORT — Alpaca long-only"
-          : (!hasOrder && !isCryptoShort && ageMs > 2 * 60 * 1000)
+        const blocked = s.status === "paper_only"
+          ? "Paper only — crypto SHORT (no Alpaca order)"
+          : (!hasOrder && s.status === "pending" && ageMs > 2 * 60 * 1000)
             ? "No order — possible buying power issue"
             : null;
         const reward = Math.abs(Number(s.tp1Price) - entry);
