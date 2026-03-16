@@ -321,6 +321,67 @@ router.get("/history", async (_req, res) => {
   }
 });
 
+/**
+ * GET /api/orders — All open Alpaca orders enriched with signal data.
+ */
+router.get("/orders", async (_req, res) => {
+  try {
+    const headers = alpacaHeaders();
+    if (!headers) {
+      return res.json([]);
+    }
+
+    const r = await fetch(
+      `${ALPACA_BASE_URL}/v2/orders?status=open&limit=200`,
+      { headers },
+    );
+    if (!r.ok) {
+      const body = await r.text();
+      return res.status(r.status).json({ error: body });
+    }
+    const orders = (await r.json()) as Record<string, string>[];
+
+    // Build lookup map: entryOrderId → signal row
+    const allSignals = await db
+      .select()
+      .from(liveSignals)
+      .orderBy(desc(liveSignals.createdAt))
+      .limit(200);
+
+    const signalByOrderId = new Map<string, typeof allSignals[number]>();
+    for (const sig of allSignals) {
+      if (sig.entryOrderId) {
+        signalByOrderId.set(sig.entryOrderId, sig);
+      }
+    }
+
+    const enriched = orders
+      .map((o) => {
+        const sig = signalByOrderId.get(o.id) ?? null;
+        return {
+          id: o.id,
+          symbol: o.symbol,
+          side: o.side,
+          qty: Number(o.qty),
+          limit_price: Number(o.limit_price),
+          reserved_usd: Number(o.qty) * Number(o.limit_price),
+          time_in_force: o.time_in_force,
+          created_at: o.created_at,
+          age_hours: Math.floor((Date.now() - new Date(o.created_at).getTime()) / 3600000),
+          pattern: sig?.patternType ?? null,
+          direction: sig?.direction ?? null,
+          signal_id: sig?.id ?? null,
+        };
+      })
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    res.json(enriched);
+  } catch (err) {
+    console.error("[API] Failed to fetch orders:", err);
+    res.status(500).json({ error: "Failed to fetch orders" });
+  }
+});
+
 // ============================================================
 // Watchlist CRUD
 // ============================================================
