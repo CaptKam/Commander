@@ -108,7 +108,7 @@ function getEasternTime(): Date {
  * Returns true if within the extended stock scanning window:
  * Mon-Fri 9:00 AM – 4:30 PM Eastern (30-min buffer each side of 9:30–4:00).
  */
-function isStockMarketOpen(): boolean {
+export function isStockMarketOpen(): boolean {
   const eastern = getEasternTime();
   const day = eastern.getDay(); // 0=Sun, 6=Sat
   if (day === 0 || day === 6) return false;
@@ -147,6 +147,12 @@ let lastDailyStockScanDate: string | null = null;
 let isScanning = false;
 let scanCount = 0;
 let scanIntervalId: ReturnType<typeof setInterval> | null = null;
+
+// Exported scan metrics for /api/status
+export let lastScanTimestamp: number = 0;
+export let lastScanCandidates: number = 0;
+export let lastScanPassedFilter: number = 0;
+export { scanCount as totalScanCount };
 
 // ============================================================
 // Sent Signals Cache — prevents re-processing the same forming
@@ -191,6 +197,7 @@ async function runScanCycle(): Promise<void> {
 
   isScanning = true;
   const cycleStart = Date.now();
+  lastScanTimestamp = cycleStart;
 
   try {
     scanCount++;
@@ -293,11 +300,14 @@ async function runScanCycle(): Promise<void> {
       }
     }
 
+    lastScanCandidates = candidates.length;
+
     console.log(
       `[Orchestrator] Scan #${scanCount}: ${candidates.length} raw candidates found`,
     );
 
     if (candidates.length === 0) {
+      lastScanPassedFilter = 0;
       const elapsed = Date.now() - cycleStart;
       console.log(
         `[Orchestrator] Scan #${scanCount} complete (${elapsed}ms) — no signals`,
@@ -310,6 +320,7 @@ async function runScanCycle(): Promise<void> {
     // Applied BEFORE dedup so bad signals never hit the database.
     // ============================================================
     const qualityPassed = validateSignalQuality(candidates);
+    lastScanPassedFilter = qualityPassed.length;
 
     // ============================================================
     // Step 3: Filter through Phase C screener (kills Crab/Deep Crab)
@@ -385,6 +396,15 @@ async function runScanCycle(): Promise<void> {
 
       const isCrypto = signal.symbol.includes("/");
 
+      // ---- Early reject: crypto SHORTs can never execute on Alpaca ----
+      if (isCrypto && signal.direction === "short") {
+        console.log(
+          `[Orchestrator] Skipping crypto SHORT — cannot execute on Alpaca: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
+        );
+        markSignalSent(signal);
+        continue;
+      }
+
       try {
         // ---- Zod validation (Anti-NULL Rule: CLAUDE.md Rule #2) ----
         const parsed = insertLiveSignalSchema.parse({
@@ -426,10 +446,6 @@ async function runScanCycle(): Promise<void> {
         if (!settings.tradingEnabled) {
           console.log(
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
-          );
-        } else if (isCrypto && signal.direction === "short") {
-          console.log(
-            `[Alpaca] Crypto SHORT signal saved but not traded — Alpaca does not support crypto shorting: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
           );
         } else if (equity !== null) {
           // Pre-check: skip if order notional exceeds available buying power

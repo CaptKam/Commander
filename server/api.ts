@@ -8,8 +8,9 @@ import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
-import { getStreamPrice } from "./websocket-stream";
+import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
+import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen } from "./orchestrator";
 
 const router = Router();
 
@@ -572,6 +573,13 @@ router.get("/status", (_req, res) => {
     uptime: process.uptime(),
     cache: cacheStats,
     timestamp: new Date().toISOString(),
+    scan_count: totalScanCount,
+    last_scan_age_seconds: lastScanTimestamp > 0 ? Math.floor((Date.now() - lastScanTimestamp) / 1000) : null,
+    last_scan_candidates: lastScanCandidates,
+    last_scan_passed_filter: lastScanPassedFilter,
+    filter_pass_rate: lastScanCandidates > 0 ? Math.round((lastScanPassedFilter / lastScanCandidates) * 100) : 0,
+    websocket: getStreamStatus(),
+    market_open: isStockMarketOpen(),
   });
 });
 
@@ -605,6 +613,20 @@ router.get("/approaching", async (_req, res) => {
           ? (s.direction === "long" ? entry + adRange : entry - adRange)
           : null;
 
+        // hasOrder / blocked / rr enrichment
+        const hasOrder = !!s.entryOrderId;
+        const isCrypto = s.symbol.includes("/");
+        const isCryptoShort = isCrypto && s.direction === "short";
+        const ageMs = s.createdAt ? Date.now() - new Date(s.createdAt).getTime() : 0;
+        const blocked = isCryptoShort
+          ? "Crypto SHORT — Alpaca long-only"
+          : (!hasOrder && !isCryptoShort && ageMs > 2 * 60 * 1000)
+            ? "No order — possible buying power issue"
+            : null;
+        const reward = Math.abs(Number(s.tp1Price) - entry);
+        const risk = Math.abs(entry - Number(s.stopLossPrice));
+        const rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : 0;
+
         return {
           id: s.id,
           symbol: s.symbol,
@@ -624,6 +646,9 @@ router.get("/approaching", async (_req, res) => {
           c: s.cPrice ? Number(s.cPrice) : null,
           distancePct: Math.round(distPct * 100) / 100,
           createdAt: s.createdAt,
+          hasOrder,
+          blocked,
+          rr,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 50)
