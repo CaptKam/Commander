@@ -17,6 +17,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { formatAlpacaQty } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
 import { getStreamPrice } from "./websocket-stream";
+import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 
 // ============================================================
 // Environment
@@ -50,6 +51,7 @@ interface AlpacaPosition {
 // ============================================================
 async function getPositions(): Promise<AlpacaPosition[]> {
   const { key, secret, base } = getAlpacaConfig();
+  checkTradingRateLimit();
   const res = await fetch(`${base}/v2/positions`, {
     headers: {
       "APCA-API-KEY-ID": key,
@@ -63,11 +65,45 @@ async function getPositions(): Promise<AlpacaPosition[]> {
   return (await res.json()) as AlpacaPosition[];
 }
 
+async function getOpenOrders(symbol: string): Promise<{ id: string }[]> {
+  const { key, secret, base } = getAlpacaConfig();
+  try {
+    checkTradingRateLimit();
+    const res = await fetch(
+      `${base}/v2/orders?status=open&symbols=${encodeURIComponent(symbol)}`,
+      { headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret } },
+    );
+    if (!res.ok) return [];
+    return (await res.json()) as { id: string }[];
+  } catch {
+    return [];
+  }
+}
+
+async function cancelOrder(orderId: string): Promise<void> {
+  const { key, secret, base } = getAlpacaConfig();
+  try {
+    checkTradingRateLimit();
+    await fetch(`${base}/v2/orders/${orderId}`, {
+      method: "DELETE",
+      headers: { "APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret },
+    });
+  } catch {}
+}
+
+async function cancelAllOrdersForSymbol(symbol: string): Promise<void> {
+  const orders = await getOpenOrders(symbol);
+  if (orders.length === 0) return;
+  await Promise.all(orders.map((o) => cancelOrder(o.id)));
+  console.log(`[PositionMonitor] Cancelled ${orders.length} open orders for ${symbol}`);
+}
+
 async function closePosition(
   symbol: string,
   qty: string,
 ): Promise<void> {
   const { key, secret, base } = getAlpacaConfig();
+  checkTradingRateLimit();
   const res = await fetch(
     `${base}/v2/positions/${encodeURIComponent(symbol)}`,
     {
@@ -123,10 +159,23 @@ export async function runCryptoMonitor(): Promise<void> {
 
       if (!signal) continue;
 
-      const tp1 = Number(signal.tp1Price);
-      const tp2 = Number(signal.tp2Price);
-      const sl = Number(signal.stopLossPrice);
-      const isLong = signal.direction === "long";
+      // Re-read signal status from DB to avoid race with exit-manager
+      // (exit-manager runs first in the orchestrator's finally block and may
+      // have already closed this signal since we loaded activeSignals above)
+      const [freshSignal] = await db
+        .select()
+        .from(liveSignals)
+        .where(eq(liveSignals.id, signal.id))
+        .limit(1);
+      if (!freshSignal || freshSignal.status === "closed" || freshSignal.status === "cancelled" || freshSignal.status === "exit_failed") {
+        continue; // exit-manager already handled this
+      }
+
+      const tp1 = Number(freshSignal.tp1Price);
+      const tp2 = Number(freshSignal.tp2Price);
+      const sl = Number(freshSignal.stopLossPrice);
+      const isLong = freshSignal.direction === "long";
+      const signalStatus = freshSignal.status;
 
       // ---- Check SL hit ----
       const slHit = isLong ? currentPrice <= sl : currentPrice >= sl;
@@ -135,13 +184,15 @@ export async function runCryptoMonitor(): Promise<void> {
           `[PositionMonitor] SL HIT: ${pos.symbol} ${priceSource}=$${currentPrice} SL=$${sl} — closing full position`,
         );
         try {
+          // Cancel outstanding TP limit orders first (Bug 6 fix applies here too)
+          await cancelAllOrdersForSymbol(pos.symbol);
           const safeQty = formatAlpacaQty(posQty, isCrypto);
           await closePosition(pos.symbol, String(safeQty));
           await db
             .update(liveSignals)
             .set({ status: "closed" })
-            .where(eq(liveSignals.id, signal.id));
-          console.log(`[PositionMonitor] Position closed and signal #${signal.id} marked closed`);
+            .where(eq(liveSignals.id, freshSignal.id));
+          console.log(`[PositionMonitor] Position closed and signal #${freshSignal.id} marked closed`);
         } catch (err) {
           console.error(`[PositionMonitor] Failed to close SL position ${pos.symbol}:`, err);
           sendError(`PositionMonitor SL close failed: ${pos.symbol}`, err).catch(() => {});
@@ -150,21 +201,25 @@ export async function runCryptoMonitor(): Promise<void> {
       }
 
       // ---- Check TP1 hit (only if not already partial_exit) ----
-      if (signal.status === "filled") {
+      if (signalStatus === "filled") {
         const tp1Hit = isLong ? currentPrice >= tp1 : currentPrice <= tp1;
         if (tp1Hit) {
           console.log(
             `[PositionMonitor] TP1 HIT: ${pos.symbol} ${priceSource}=$${currentPrice} TP1=$${tp1} — closing 50%`,
           );
           try {
+            // Cancel existing TP limit orders placed by exit-manager to prevent
+            // over-selling (the limit orders would try to sell shares we're
+            // already closing via the DELETE /positions endpoint)
+            await cancelAllOrdersForSymbol(pos.symbol);
             const halfQty = posQty / 2;
             const safeQty = formatAlpacaQty(halfQty, isCrypto);
             await closePosition(pos.symbol, String(safeQty));
             await db
               .update(liveSignals)
-              .set({ status: "partial_exit" })
-              .where(eq(liveSignals.id, signal.id));
-            console.log(`[PositionMonitor] 50% closed, signal #${signal.id} → partial_exit`);
+              .set({ status: "partial_exit", tp1OrderId: null, tp2OrderId: null })
+              .where(eq(liveSignals.id, freshSignal.id));
+            console.log(`[PositionMonitor] 50% closed, signal #${freshSignal.id} → partial_exit`);
           } catch (err) {
             console.error(`[PositionMonitor] Failed to close TP1 position ${pos.symbol}:`, err);
             sendError(`PositionMonitor TP1 close failed: ${pos.symbol}`, err).catch(() => {});
@@ -174,20 +229,22 @@ export async function runCryptoMonitor(): Promise<void> {
       }
 
       // ---- Check TP2 hit (only after partial_exit) ----
-      if (signal.status === "partial_exit") {
+      if (signalStatus === "partial_exit") {
         const tp2Hit = isLong ? currentPrice >= tp2 : currentPrice <= tp2;
         if (tp2Hit) {
           console.log(
             `[PositionMonitor] TP2 HIT: ${pos.symbol} ${priceSource}=$${currentPrice} TP2=$${tp2} — closing remaining`,
           );
           try {
+            // Cancel any remaining limit orders before closing
+            await cancelAllOrdersForSymbol(pos.symbol);
             const safeQty = formatAlpacaQty(posQty, isCrypto);
             await closePosition(pos.symbol, String(safeQty));
             await db
               .update(liveSignals)
               .set({ status: "closed" })
-              .where(eq(liveSignals.id, signal.id));
-            console.log(`[PositionMonitor] Remaining closed, signal #${signal.id} → closed`);
+              .where(eq(liveSignals.id, freshSignal.id));
+            console.log(`[PositionMonitor] Remaining closed, signal #${freshSignal.id} → closed`);
           } catch (err) {
             console.error(`[PositionMonitor] Failed to close TP2 position ${pos.symbol}:`, err);
             sendError(`PositionMonitor TP2 close failed: ${pos.symbol}`, err).catch(() => {});

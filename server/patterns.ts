@@ -476,11 +476,17 @@ export function detectCompletedPatterns(
       }
 
       // ---- Slippage check: is current price still near D? ----
-      // Only signal if the last close is within 1.5% of D's price
+      // Only signal if the last close is within 3% of D's price.
+      // Previous 1.5% was too tight for volatile crypto on 30s scan cycles
+      // combined with 5-minute cache TTLs on 4H candles.
       const lastClose = candles[candles.length - 1].close;
       const slippagePct = Math.abs(lastClose - D.price) / D.price;
-      if (slippagePct > 0.015) {
-        continue; // Price has moved too far from D — missed entry
+      if (slippagePct > 0.03) {
+        console.log(
+          `[Harmonics] Skipping completed ${symbol} ${timeframe} ${pattern.name} — ` +
+          `slippage ${(slippagePct * 100).toFixed(2)}% > 3% (close=$${lastClose.toFixed(2)}, D=$${D.price.toFixed(2)})`,
+        );
+        continue;
       }
 
       console.log(

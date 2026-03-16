@@ -197,42 +197,48 @@ router.get("/metrics", async (_req, res) => {
       symbolOrders.get(sym)!.push(o);
     }
 
-    // For each signal, check if we have enough order data to compute outcome
+    // Compute actual win/loss from closed signals based on their exit outcome
+    // (not R:R heuristic — that tells you setup quality, not actual results)
     for (const sig of allSignals) {
-      const entry = Number(sig.entryPrice);
-      const tp1 = Number(sig.tp1Price);
-      const sl = Number(sig.stopLossPrice);
-      if (!entry || !tp1 || !sl) continue;
+      // Only count fully closed signals with real fill data
+      if (sig.status !== "closed") continue;
+      const entry = Number(sig.filledAvgPrice || sig.entryPrice);
+      if (!entry) continue;
 
-      // Estimate R/R based on signal targets
-      const risk = Math.abs(entry - sl);
-      const reward = Math.abs(tp1 - entry);
-      if (risk === 0) continue;
-
-      // Find matching filled order
+      // Find exit orders for this signal's symbol
       const symOrders = symbolOrders.get(sig.symbol);
       if (!symOrders) continue;
 
-      const matchedOrder = symOrders.find((o) => {
-        const filledPrice = Number(o.filled_avg_price);
-        // Match if filled price is within 2% of signal entry
-        return Math.abs(filledPrice - entry) / entry < 0.02;
-      });
+      // Look for exit side orders (sells for longs, buys for shorts)
+      const exitSide = sig.direction === "long" ? "sell" : "buy";
+      const exitOrders = symOrders.filter((o) => o.side === exitSide && Number(o.filled_avg_price) > 0);
+      if (exitOrders.length === 0) continue;
 
-      if (!matchedOrder) continue;
-
-      // Use the signal's R/R to estimate outcome
-      // If TP was closer to entry than SL, it's a favorable setup
-      const rr = reward / risk;
-      if (sig.status === "executed" || matchedOrder.status === "filled") {
-        // Simple heuristic: count as win if R:R >= 1
-        if (rr >= 1) {
-          wins++;
-          grossProfit += reward;
-        } else {
-          losses++;
-          grossLoss += risk;
+      // Compute weighted avg exit price
+      let totalQty = 0;
+      let totalValue = 0;
+      for (const o of exitOrders) {
+        const qty = Number(o.filled_qty || o.qty);
+        const price = Number(o.filled_avg_price);
+        if (qty > 0 && price > 0) {
+          totalQty += qty;
+          totalValue += qty * price;
         }
+      }
+      if (totalQty === 0) continue;
+      const avgExitPrice = totalValue / totalQty;
+
+      // P&L based on actual direction
+      const pl = sig.direction === "long"
+        ? (avgExitPrice - entry) * totalQty
+        : (entry - avgExitPrice) * totalQty;
+
+      if (pl >= 0) {
+        wins++;
+        grossProfit += pl;
+      } else {
+        losses++;
+        grossLoss += Math.abs(pl);
       }
     }
 

@@ -161,7 +161,8 @@ function isSignalAlreadySent(signal: PhaseCSignal): boolean {
   const now = Date.now();
   const expiresAt = sentSignals.get(key);
   if (expiresAt && expiresAt > now) return true;
-  sentSignals.set(key, now + SIGNAL_CACHE_TTL_MS);
+  // NOTE: Do NOT set the cache here — only mark after the signal is
+  // actually processed (DB dedup passed + DB insert succeeded).
   // Lazy cleanup
   if (sentSignals.size > 500) {
     for (const [k, v] of sentSignals) {
@@ -169,6 +170,11 @@ function isSignalAlreadySent(signal: PhaseCSignal): boolean {
     }
   }
   return false;
+}
+
+function markSignalSent(signal: PhaseCSignal): void {
+  const key = `${signal.symbol}:${signal.timeframe}:${signal.pattern}:${signal.direction}`;
+  sentSignals.set(key, Date.now() + SIGNAL_CACHE_TTL_MS);
 }
 
 // ============================================================
@@ -360,7 +366,7 @@ async function runScanCycle(): Promise<void> {
               eq(liveSignals.timeframe, signal.timeframe),
               eq(liveSignals.patternType, signal.pattern),
               eq(liveSignals.direction, signal.direction),
-              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "cancelled"]),
+              inArray(liveSignals.status, ["pending", "filled", "partial_exit"]),
               gte(liveSignals.createdAt, timeWindow),
             ),
           )
@@ -412,6 +418,9 @@ async function runScanCycle(): Promise<void> {
           `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern} (id=${inserted.id})`,
         );
 
+        // Mark in-memory cache AFTER successful DB insert (not before)
+        markSignalSent(signal);
+
         // ---- Place limit order on Alpaca (only if equity was fetched AND trading enabled) ----
         if (!settings.tradingEnabled) {
           console.log(
@@ -422,15 +431,26 @@ async function runScanCycle(): Promise<void> {
             `[Alpaca] Crypto SHORT signal saved but not traded — Alpaca does not support crypto shorting: ${signal.symbol} ${signal.pattern} ${signal.timeframe}`,
           );
         } else if (equity !== null) {
+          // Pre-check: skip if order notional exceeds available buying power
+          // This prevents 403 spam when GTC orders have locked up most cash
+          const allocation = isCrypto ? settings.cryptoAllocation : settings.equityAllocation;
+          const notional = equity * allocation;
+          if (buyingPower !== null && notional > buyingPower) {
+            console.warn(
+              `[Orchestrator] Skipping order for ${signal.symbol}: notional $${notional.toFixed(2)} ` +
+              `exceeds available buying power $${buyingPower.toFixed(2)}`,
+            );
+          } else {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
-            equity: settings.equityAllocation,
-            crypto: settings.cryptoAllocation,
-          }, buyingPower ?? undefined);
-          // Save the Alpaca order ID so exit-manager can track fills
-          await db
-            .update(liveSignals)
-            .set({ entryOrderId: order.id })
-            .where(eq(liveSignals.id, inserted.id));
+              equity: settings.equityAllocation,
+              crypto: settings.cryptoAllocation,
+            }, buyingPower ?? undefined);
+            // Save the Alpaca order ID so exit-manager can track fills
+            await db
+              .update(liveSignals)
+              .set({ entryOrderId: order.id })
+              .where(eq(liveSignals.id, inserted.id));
+          }
         } else {
           console.warn(
             `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
