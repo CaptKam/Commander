@@ -10,7 +10,7 @@
 
 import { sendSystemBoot, sendError, sendPhaseCSignal } from "./utils/notifier";
 import { fetchWatchlist } from "./alpaca-data";
-import { detectHarmonics, detectCompletedPatterns } from "./patterns";
+import { detectHarmonics, detectCompletedPatterns, detectPatternPhase } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
 import { runExitCycle } from "./exit-manager";
@@ -19,6 +19,7 @@ import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
 import { startPriceStreams, stopPriceStreams } from "./websocket-stream";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
+import { getSymbolsDueForScan, updateScanState, initializeScanStates, getScanStateStats } from "./scan-scheduler";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
 import { and, eq, gte, inArray } from "drizzle-orm";
@@ -230,42 +231,80 @@ async function runScanCycle(): Promise<void> {
   try {
     scanCount++;
 
+    // ============================================================
+    // Step 0: Initialize scan states on first run
+    // ============================================================
+    if (scanCount === 1) {
+      try {
+        const activeSymbols = await getActiveWatchlist();
+        await initializeScanStates(activeSymbols, TIMEFRAMES);
+      } catch (err) {
+        console.error("[Orchestrator] Failed to initialize scan states (non-fatal):", err);
+      }
+    }
+
     // ---- Heartbeat: every 10th scan (~5 min at 30s intervals) ----
     if (scanCount % HEARTBEAT_EVERY_N_SCANS === 0) {
-      console.log(
-        `[Orchestrator] 💓 Heartbeat: ${scanCount} scans completed. ` +
-          `Engine is alive. ${new Date().toISOString()}`,
-      );
+      try {
+        const stats = await getScanStateStats();
+        console.log(
+          `[Orchestrator] 💓 Heartbeat: ${scanCount} scans. ` +
+          `${stats.dueNow} due now, ${stats.hotSymbols.length} hot, ` +
+          `${stats.byPhase["D_APPROACHING"] || 0} approaching D. ` +
+          `Phase distribution: ${Object.entries(stats.byPhase).map(([p,c]) => `${p}=${c}`).join(", ")}`,
+        );
+      } catch {
+        console.log(
+          `[Orchestrator] 💓 Heartbeat: ${scanCount} scans completed. ` +
+            `Engine is alive. ${new Date().toISOString()}`,
+        );
+      }
     }
 
     // ============================================================
-    // Step 0: Load settings from DB
+    // Step 0.5: Load settings from DB
     // ============================================================
     const settings = await getSettings();
 
     // ============================================================
-    // Step 1: Determine which symbols to scan based on market hours
-    // Crypto: always. Equities: only during extended market hours
-    // or once after close for the daily candle.
+    // Step 1: Get symbols due for scanning (priority queue)
+    // Falls back to full watchlist if scheduler fails.
     // ============================================================
     const activeSymbols = await getActiveWatchlist();
     const marketOpen = isStockMarketOpen();
     const postClose = isPostCloseWindow();
     const todayDate = getEasternTime().toISOString().slice(0, 10);
     const dailyScanDone = lastDailyStockScanDate === todayDate;
+    const includeEquities = marketOpen || (postClose && !dailyScanDone);
 
-    // Decide which symbols to scan
     const cryptoSymbols = activeSymbols.filter((s) => s.includes("/"));
     const equitySymbols = activeSymbols.filter((s) => !s.includes("/"));
 
-    // Include equities if market is open, OR during post-close window for daily candle (once)
-    const includeEquities = marketOpen || (postClose && !dailyScanDone);
-    const symbolsToScan = includeEquities
-      ? activeSymbols
-      : cryptoSymbols;
+    let usedScheduler = false;
+    let filteredJobs: Array<{ symbol: string; timeframe: "1D" | "4H"; currentPhase: string }> = [];
 
-    // Decide timeframes: if post-close only scan, only fetch 1D for stocks
-    const timeframesToScan: Array<"1D" | "4H"> = [...TIMEFRAMES];
+    try {
+      const scanJobs = await getSymbolsDueForScan();
+
+      // Apply market hours filter: remove equity jobs if market is closed
+      filteredJobs = scanJobs.filter(job => {
+        if (job.symbol.includes("/")) return true; // crypto always scans
+        return includeEquities;
+      });
+      usedScheduler = true;
+    } catch (err) {
+      console.error("[Orchestrator] Scheduler failed, falling back to full watchlist:", err);
+    }
+
+    // Fallback: if scheduler failed, build jobs from full watchlist (old behavior)
+    if (!usedScheduler) {
+      const symbolsToScan = includeEquities ? activeSymbols : cryptoSymbols;
+      for (const symbol of symbolsToScan) {
+        for (const tf of TIMEFRAMES) {
+          filteredJobs.push({ symbol, timeframe: tf, currentPhase: "UNKNOWN" });
+        }
+      }
+    }
 
     if (!marketOpen && postClose && !dailyScanDone) {
       console.log(
@@ -274,10 +313,11 @@ async function runScanCycle(): Promise<void> {
     }
 
     // Pipeline stats: Step 1 — what we're scanning
+    const uniqueSymbolsThisCycle = new Set(filteredJobs.map(j => j.symbol));
     try {
-      pipelineStats.symbolsScanned = symbolsToScan.length;
-      pipelineStats.cryptoCount = cryptoSymbols.length;
-      pipelineStats.equityCount = includeEquities ? equitySymbols.length : 0;
+      pipelineStats.symbolsScanned = uniqueSymbolsThisCycle.size;
+      pipelineStats.cryptoCount = [...uniqueSymbolsThisCycle].filter(s => s.includes("/")).length;
+      pipelineStats.equityCount = [...uniqueSymbolsThisCycle].filter(s => !s.includes("/")).length;
       pipelineStats.marketOpen = marketOpen;
       // Reset per-cycle counters
       pipelineStats.rawCandidates = 0;
@@ -291,29 +331,38 @@ async function runScanCycle(): Promise<void> {
       pipelineStats.paperOnlyCount = 0;
     } catch {}
 
+    if (filteredJobs.length === 0) {
+      // Nothing due this cycle — quick exit
+      return;
+    }
+
     console.log(
-      `[Orchestrator] Scan #${scanCount}: Market ${marketOpen ? "OPEN" : "CLOSED"} — ` +
-        `scanning ${symbolsToScan.length}/${activeSymbols.length} symbols ` +
-        `(${cryptoSymbols.length} crypto${includeEquities ? ` + ${equitySymbols.length} equity` : ", equities skipped"})`,
+      `[Orchestrator] Scan #${scanCount}: ${filteredJobs.length} jobs due ` +
+      `(${filteredJobs.filter(j => j.currentPhase === "D_APPROACHING").length} approaching D, ` +
+      `${filteredJobs.filter(j => j.currentPhase === "CD_PROJECTED").length} projected, ` +
+      `${filteredJobs.filter(j => ["NO_PATTERN","XA_FORMING","AB_FORMING"].includes(j.currentPhase)).length} cold)`,
     );
+
+    // ============================================================
+    // Step 2: Fetch candles ONLY for due symbols
+    // ============================================================
+    // Group jobs by timeframe for batched fetching
+    const jobsByTf = new Map<"1D" | "4H", Set<string>>();
+    for (const job of filteredJobs) {
+      if (!jobsByTf.has(job.timeframe)) jobsByTf.set(job.timeframe, new Set());
+      jobsByTf.get(job.timeframe)!.add(job.symbol);
+    }
 
     const allCandleData = new Map<
       string,
       { candles: Awaited<ReturnType<typeof fetchWatchlist>> extends Map<string, infer V> ? V : never; timeframe: "1D" | "4H" }[]
     >();
 
-    for (const tf of timeframesToScan) {
-      // For post-close daily scan: only fetch 1D for equities, all TFs for crypto
-      let fetchSymbols: string[];
-      if (!marketOpen && postClose && !dailyScanDone) {
-        // Post-close: crypto gets all TFs, equities only get 1D
-        fetchSymbols = tf === "1D" ? symbolsToScan : cryptoSymbols;
-      } else {
-        fetchSymbols = symbolsToScan;
-      }
-      if (fetchSymbols.length === 0) continue;
+    for (const [tf, symbolSet] of jobsByTf) {
+      const symbols = [...symbolSet];
+      if (symbols.length === 0) continue;
 
-      const watchlistData = await fetchWatchlist(fetchSymbols, tf);
+      const watchlistData = await fetchWatchlist(symbols, tf);
       for (const [symbol, candles] of watchlistData) {
         if (!allCandleData.has(symbol)) allCandleData.set(symbol, []);
         allCandleData.get(symbol)!.push({ candles, timeframe: tf });
@@ -327,7 +376,24 @@ async function runScanCycle(): Promise<void> {
     }
 
     // ============================================================
-    // Step 2: Run harmonic detection on all fetched data
+    // Step 2.5: Update scan state for every scanned symbol
+    // Detect pattern phase and update the scheduler (sets next scan due)
+    // ============================================================
+    for (const [symbol, datasets] of allCandleData) {
+      for (const { candles, timeframe } of datasets) {
+        if (candles.length < 20) continue;
+        try {
+          const phaseResult = detectPatternPhase(candles, symbol, timeframe);
+          await updateScanState(symbol, timeframe, phaseResult);
+        } catch (err) {
+          // Non-fatal: scheduler update failure doesn't block signal detection
+          console.error(`[Orchestrator] Phase detection failed for ${symbol} ${timeframe}:`, err);
+        }
+      }
+    }
+
+    // ============================================================
+    // Step 3: Run harmonic detection on all fetched data
     // Both forming (Phase C) and completed (all 5 pivots confirmed)
     // ============================================================
     const candidates: PhaseCSignal[] = [];

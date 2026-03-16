@@ -116,6 +116,23 @@ interface PipelineData {
   websocket: { crypto: string; stock: string; priceCount: number };
 }
 
+interface ScanStateData {
+  total: number;
+  byPhase: Record<string, number>;
+  dueNow: number;
+  nextDue: string | null;
+  hotSymbols: Array<{
+    symbol: string;
+    timeframe: string;
+    phase: string;
+    bestPattern: string | null;
+    bestDirection: string | null;
+    projectedD: string | null;
+    distanceToDPct: string | null;
+    nextScanDue: string;
+  }>;
+}
+
 interface TradeHistory {
   symbol: string;
   side: string;
@@ -179,13 +196,14 @@ export default function App() {
   const [history, setHistory] = useState<TradeHistory[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [pipeline, setPipeline] = useState<PipelineData | null>(null);
+  const [scanState, setScanState] = useState<ScanStateData | null>(null);
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes, pipeRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes, pipeRes, ssRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -197,6 +215,7 @@ export default function App() {
           fetch("/api/history").then((r) => r.json()),
           fetch("/api/watchlist").then((r) => r.json()),
           fetch("/api/pipeline").then((r) => r.json()),
+          fetch("/api/scan-state").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value)) setPositions(posRes.value);
@@ -208,6 +227,7 @@ export default function App() {
       if (histRes.status === "fulfilled" && Array.isArray(histRes.value)) setHistory(histRes.value);
       if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value)) setWatchlist(wlRes.value);
       if (pipeRes.status === "fulfilled") setPipeline(pipeRes.value);
+      if (ssRes.status === "fulfilled") setScanState(ssRes.value);
     } catch {
     } finally {
       setLoading(false);
@@ -503,6 +523,7 @@ export default function App() {
           {/* SCAN PIPELINE + LIVE FEED */}
           <div className="shrink-0 flex flex-col overflow-y-auto" style={{ height: "40%" }}>
             <ScanPipeline data={pipeline} />
+            <ScanStateView data={scanState} />
             <div className="shrink-0 flex items-center justify-between px-3 h-7 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
               <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
                 Live Feed
@@ -957,6 +978,136 @@ function PipeBullet({ text }: { text: string }) {
     <div className="flex items-start gap-2 py-1">
       <div className="w-1 h-1 rounded-full mt-1.5 shrink-0" style={{ background: "var(--text-muted)" }} />
       <span className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{text}</span>
+    </div>
+  );
+}
+
+// ============================================================
+// Scan State View — tiered scanner phase distribution + hot symbols
+// ============================================================
+const PHASE_COLORS: Record<string, string> = {
+  NO_PATTERN: "var(--text-muted)",
+  XA_FORMING: "var(--text-muted)",
+  AB_FORMING: "var(--text-muted)",
+  BC_FORMING: "var(--accent-amber)",
+  CD_PROJECTED: "var(--accent-green)",
+  D_APPROACHING: "var(--accent-red)",
+};
+
+const PHASE_ORDER = ["NO_PATTERN", "XA_FORMING", "AB_FORMING", "BC_FORMING", "CD_PROJECTED", "D_APPROACHING"];
+
+function ScanStateView({ data }: { data: ScanStateData | null }) {
+  if (!data || data.total === 0) return null;
+
+  const phases = PHASE_ORDER.filter(p => (data.byPhase[p] ?? 0) > 0);
+
+  return (
+    <div className="rounded-md border mb-4 mx-3" style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
+      <div className="px-4 py-3 border-b flex justify-between items-center" style={{ borderColor: "var(--border-color)" }}>
+        <h3 className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
+          Scanner state
+        </h3>
+        <span className="text-[10px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          {data.total} tracked · {data.dueNow} due · {data.hotSymbols.length} hot
+        </span>
+      </div>
+      <div className="px-4 py-3">
+        {/* Phase distribution bar */}
+        <div className="flex rounded overflow-hidden h-3 mb-2" style={{ background: "var(--bg-main)" }}>
+          {phases.map(phase => {
+            const count = data.byPhase[phase] ?? 0;
+            const pct = data.total > 0 ? (count / data.total) * 100 : 0;
+            if (pct === 0) return null;
+            return (
+              <div
+                key={phase}
+                title={`${phase}: ${count}`}
+                style={{
+                  width: `${pct}%`,
+                  background: PHASE_COLORS[phase] ?? "var(--text-muted)",
+                  opacity: phase === "NO_PATTERN" || phase === "XA_FORMING" || phase === "AB_FORMING" ? 0.3 : 0.7,
+                  minWidth: count > 0 ? 4 : 0,
+                }}
+              />
+            );
+          })}
+        </div>
+
+        {/* Phase legend */}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-3">
+          {phases.map(phase => (
+            <div key={phase} className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-sm" style={{ background: PHASE_COLORS[phase] ?? "var(--text-muted)" }} />
+              <span className="text-[9px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+                {phase.replace("_", " ")}: {data.byPhase[phase] ?? 0}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Hot symbols */}
+        {data.hotSymbols.length > 0 && (
+          <div>
+            <div className="text-[9px] uppercase tracking-wider font-semibold mb-2" style={{ color: "var(--accent-green)" }}>
+              Hot symbols
+            </div>
+            <div className="space-y-1">
+              {data.hotSymbols.map((s, i) => (
+                <div
+                  key={`${s.symbol}-${s.timeframe}-${i}`}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5"
+                  style={{
+                    background: "var(--bg-main)",
+                    border: "0.5px solid var(--border-color)",
+                    animation: s.phase === "D_APPROACHING" ? "pulse 2s ease-in-out infinite" : undefined,
+                  }}
+                >
+                  <span className="text-[10px] font-bold" style={{
+                    color: s.phase === "D_APPROACHING" ? "var(--accent-red)" : "var(--accent-green)",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    minWidth: 70,
+                  }}>
+                    {s.symbol}
+                  </span>
+                  <span className="text-[9px] px-1 py-px rounded" style={{
+                    background: s.phase === "D_APPROACHING" ? "rgba(239,68,68,0.15)" : "var(--accent-green-dim)",
+                    color: s.phase === "D_APPROACHING" ? "var(--accent-red)" : "var(--accent-green)",
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    {s.timeframe}
+                  </span>
+                  {s.bestPattern && (
+                    <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{s.bestPattern}</span>
+                  )}
+                  {s.bestDirection && (
+                    <span className="text-[9px] font-semibold" style={{
+                      color: s.bestDirection === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                    }}>
+                      {s.bestDirection.toUpperCase()}
+                    </span>
+                  )}
+                  {s.projectedD && (
+                    <span className="text-[9px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+                      D=${Number(s.projectedD).toFixed(2)}
+                    </span>
+                  )}
+                  {s.distanceToDPct && (
+                    <span className="text-[9px] font-bold" style={{
+                      color: Number(s.distanceToDPct) <= 2 ? "var(--accent-red)" : "var(--accent-amber)",
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                      {Number(s.distanceToDPct).toFixed(1)}% away
+                    </span>
+                  )}
+                  <span className="text-[9px] ml-auto" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                    {s.phase === "D_APPROACHING" ? "IMMINENT" : "PROJECTED"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
