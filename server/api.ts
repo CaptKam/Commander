@@ -6,7 +6,7 @@
 import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings } from "../shared/schema";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
@@ -649,7 +649,7 @@ router.get("/approaching", async (_req, res) => {
     const pending = await db
       .select()
       .from(liveSignals)
-      .where(eq(liveSignals.status, "pending"))
+      .where(inArray(liveSignals.status, ["pending", "paper_only"]))
       .orderBy(desc(liveSignals.createdAt));
 
     const enriched = pending
@@ -704,6 +704,7 @@ router.get("/approaching", async (_req, res) => {
           hasOrder,
           blocked,
           rr,
+          paperOnly: s.status === "paper_only",
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null && s.distancePct <= 50)
