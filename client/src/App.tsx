@@ -125,6 +125,8 @@ interface ScanStateData {
   byPhase: Record<string, number>;
   dueNow: number;
   nextDue: string | null;
+  totalUniverse?: number;
+  favoriteSymbols?: string[];
   hotSymbols: Array<{
     symbol: string;
     timeframe: string;
@@ -1030,13 +1032,58 @@ const PHASE_COLORS: Record<string, string> = {
 const PHASE_ORDER = ["NO_PATTERN", "XA_FORMING", "AB_FORMING", "BC_FORMING", "CD_PROJECTED", "D_APPROACHING"];
 
 function ScanStateView({ data }: { data: ScanStateData | null }) {
+  const [refreshing, setRefreshing] = useState(false);
   if (!data || data.total === 0) return null;
 
   const phases = PHASE_ORDER.filter(p => (data.byPhase[p] ?? 0) > 0);
+  const favoriteSet = new Set(data.favoriteSymbols ?? []);
+  const cryptoCount = Math.floor(data.total / 2); // rough estimate: each symbol has 2 timeframes
+  const equityCount = Math.floor(data.total / 2) - cryptoCount;
+  const hotCount = (data.byPhase["CD_PROJECTED"] ?? 0) + (data.byPhase["D_APPROACHING"] ?? 0);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetch("/api/universe/refresh", { method: "POST" });
+    } catch {}
+    setRefreshing(false);
+  };
 
   return (
     <div style={{ background: "var(--bg-panel)" }}>
       <div className="px-4 py-3">
+        {/* Universe summary row */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[10px] font-semibold" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+            Scanning {(data.total / 2).toLocaleString(undefined, { maximumFractionDigits: 0 })} symbols
+            {data.totalUniverse ? ` of ${data.totalUniverse.toLocaleString()} universe` : ""}
+          </span>
+          {hotCount > 0 && (
+            <span className="text-[9px] px-1 py-px rounded font-bold" style={{ background: "var(--accent-green-dim)", color: "var(--accent-green)" }}>
+              {hotCount} hot
+            </span>
+          )}
+          {(data.byPhase["D_APPROACHING"] ?? 0) > 0 && (
+            <span className="text-[9px] px-1 py-px rounded font-bold" style={{ background: "rgba(239,68,68,0.15)", color: "var(--accent-red)" }}>
+              {data.byPhase["D_APPROACHING"]} approaching D
+            </span>
+          )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="ml-auto text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
+            style={{
+              borderColor: "var(--border-color)",
+              color: refreshing ? "var(--text-muted)" : "var(--accent-green)",
+              background: "transparent",
+              cursor: refreshing ? "default" : "pointer",
+              opacity: refreshing ? 0.5 : 1,
+            }}
+          >
+            {refreshing ? "Refreshing..." : "Refresh universe"}
+          </button>
+        </div>
+
         {/* Phase distribution bar */}
         <div className="flex rounded overflow-hidden h-3 mb-2" style={{ background: "var(--bg-main)" }}>
           {phases.map(phase => {
@@ -1087,6 +1134,14 @@ function ScanStateView({ data }: { data: ScanStateData | null }) {
                     animation: s.phase === "D_APPROACHING" ? "pulse 2s ease-in-out infinite" : undefined,
                   }}
                 >
+                  {favoriteSet.has(s.symbol) && (
+                    <span className="text-[8px] px-1 py-px rounded font-bold" style={{
+                      background: "rgba(205,166,97,0.15)",
+                      color: "var(--accent-amber)",
+                    }}>
+                      FAV
+                    </span>
+                  )}
                   <span className="text-[10px] font-bold" style={{
                     color: s.phase === "D_APPROACHING" ? "var(--accent-red)" : "var(--accent-green)",
                     fontFamily: "'JetBrains Mono', monospace",

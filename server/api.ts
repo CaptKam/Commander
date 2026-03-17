@@ -761,16 +761,59 @@ router.post("/fix-exits/:id", async (req, res) => {
 
 /**
  * GET /api/scan-state — Tiered scanner stats for the dashboard.
- * Shows phase distribution, hot symbols, and scheduling info.
+ * Shows phase distribution, hot symbols, scheduling info, and universe context.
  */
 router.get("/scan-state", async (_req, res) => {
   try {
     const { getScanStateStats } = await import("./scan-scheduler");
     const stats = await getScanStateStats();
-    res.json(stats);
+
+    // Add universe context
+    let totalUniverse = 0;
+    try {
+      const { getUniverseStats } = await import("./universe");
+      const uStats = await getUniverseStats();
+      totalUniverse = uStats.totalFiltered;
+    } catch {}
+
+    // Add favorite symbols from watchlist
+    const favorites = await db.select({ symbol: watchlist.symbol }).from(watchlist);
+    const favoriteSymbols = favorites.map((f) => f.symbol);
+
+    res.json({ ...stats, totalUniverse, favoriteSymbols });
   } catch (err) {
     console.error("[API] Failed to fetch scan state:", err);
     res.status(500).json({ error: "Failed to fetch scan state" });
+  }
+});
+
+/**
+ * GET /api/universe/stats — Universe discovery stats.
+ */
+router.get("/universe/stats", async (_req, res) => {
+  try {
+    const { getUniverseStats } = await import("./universe");
+    const stats = await getUniverseStats();
+    res.json(stats);
+  } catch (err) {
+    console.error("[API] Failed to fetch universe stats:", err);
+    res.status(500).json({ error: "Failed to fetch universe stats" });
+  }
+});
+
+/**
+ * POST /api/universe/refresh — Manually trigger a universe refresh.
+ */
+router.post("/universe/refresh", async (_req, res) => {
+  try {
+    const { getFullUniverse } = await import("./universe");
+    const { seedUniverse } = await import("./scan-scheduler");
+    const universe = await getFullUniverse();
+    const result = await seedUniverse(universe);
+    res.json({ ok: true, ...result, totalUniverse: universe.length });
+  } catch (err) {
+    console.error("[API] Universe refresh failed:", err);
+    res.status(500).json({ error: "Failed to refresh universe" });
   }
 });
 

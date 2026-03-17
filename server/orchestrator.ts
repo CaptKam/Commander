@@ -232,14 +232,49 @@ async function runScanCycle(): Promise<void> {
     scanCount++;
 
     // ============================================================
-    // Step 0: Initialize scan states on first run
+    // Step 0: Initialize scan states on first run — seed from universe
     // ============================================================
     if (scanCount === 1) {
+      // Step 1: Seed from Alpaca's full asset list (or keep existing if fetch fails)
       try {
-        const activeSymbols = await getActiveWatchlist();
-        await initializeScanStates(activeSymbols, TIMEFRAMES);
+        const { getFullUniverse } = await import("./universe");
+        const universe = await getFullUniverse();
+        if (universe.length > 0) {
+          const { seedUniverse } = await import("./scan-scheduler");
+          const result = await seedUniverse(universe);
+          console.log(
+            `[Orchestrator] Universe seeded: ${result.seeded} new, ${result.existing} existing, ${result.removed} paused`,
+          );
+        } else {
+          console.warn("[Orchestrator] Universe fetch returned empty — using existing scan states");
+        }
+      } catch (err) {
+        console.error("[Orchestrator] Universe seed failed — using existing scan states:", err);
+      }
+
+      // Step 2: Also ensure watchlist favorites are in scan_state (backward compat)
+      try {
+        const watchlistSymbols = await getActiveWatchlist();
+        await initializeScanStates(watchlistSymbols, TIMEFRAMES);
       } catch (err) {
         console.error("[Orchestrator] Failed to initialize scan states (non-fatal):", err);
+      }
+    }
+
+    // ============================================================
+    // Step 0.1: Daily universe refresh (~every 24h at 30s intervals)
+    // ============================================================
+    if (scanCount > 1 && scanCount % (24 * 60 * 2) === 0) {
+      try {
+        const { getFullUniverse } = await import("./universe");
+        const universe = await getFullUniverse();
+        if (universe.length > 0) {
+          const { seedUniverse } = await import("./scan-scheduler");
+          const result = await seedUniverse(universe);
+          console.log(`[Orchestrator] Daily universe refresh: ${result.seeded} new, ${result.removed} paused`);
+        }
+      } catch (err) {
+        console.error("[Orchestrator] Daily universe refresh failed:", err);
       }
     }
 
