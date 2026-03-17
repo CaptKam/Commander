@@ -281,7 +281,7 @@ export default function App() {
         time: t.filled_at,
         tag: "FILL",
         color: "var(--accent-green)",
-        text: `${t.direction.toUpperCase()} ${t.symbol} ${t.pattern} ${t.qty.toFixed(2)} @ ${fmt(t.filled_price)}`,
+        text: `${(t.direction ?? "").toUpperCase()} ${t.symbol} ${t.pattern ?? "?"} ${(t.qty ?? 0).toFixed(2)} @ ${fmt(t.filled_price)}`,
       });
     });
 
@@ -303,14 +303,14 @@ export default function App() {
           time: s.createdAt,
           tag: "CLOSED",
           color: "var(--text-muted)",
-          text: `${s.direction.toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} — ${s.status}`,
+          text: `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} — ${s.status}`,
         });
       } else {
         events.push({
           time: s.createdAt,
           tag: "SIGNAL",
           color: "var(--accent-amber)",
-          text: `${s.direction.toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} @ ${fmt(Number(s.entryPrice))} — ${s.status}`,
+          text: `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} @ ${fmt(Number(s.entryPrice))} — ${s.status}`,
         });
       }
     });
