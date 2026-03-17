@@ -177,7 +177,7 @@ const sentSignals = new Map<string, number>();
 const SIGNAL_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 function isSignalAlreadySent(signal: PhaseCSignal): boolean {
-  const key = `${signal.symbol}:${signal.timeframe}:${signal.pattern}:${signal.direction}`;
+  const key = signal.symbol; // Symbol-only — one signal per symbol
   const now = Date.now();
   const expiresAt = sentSignals.get(key);
   if (expiresAt && expiresAt > now) return true;
@@ -193,7 +193,7 @@ function isSignalAlreadySent(signal: PhaseCSignal): boolean {
 }
 
 function markSignalSent(signal: PhaseCSignal): void {
-  const key = `${signal.symbol}:${signal.timeframe}:${signal.pattern}:${signal.direction}`;
+  const key = signal.symbol; // Symbol-only — one signal per symbol
   sentSignals.set(key, Date.now() + SIGNAL_CACHE_TTL_MS);
 }
 
@@ -499,21 +499,18 @@ async function runScanCycle(): Promise<void> {
       }
 
       // ---- Layer 2: DB dedup (authoritative, survives restarts) ----
-      // Uses the age window from quality-filters: 1D=14 days, 4H=7 days
+      // One signal per symbol — if ANY active signal exists for this symbol, skip.
+      // Only active statuses block; dismissed/expired/outranked do NOT block new signals.
       try {
-        const windowMs = AGE_WINDOW_MS[signal.timeframe as keyof typeof AGE_WINDOW_MS] ?? (14 * 24 * 60 * 60 * 1000);
-        const timeWindow = new Date(Date.now() - windowMs);
+        const timeWindow = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7-day window
 
         const existing = await db
-          .select({ id: liveSignals.id })
+          .select({ id: liveSignals.id, patternType: liveSignals.patternType, timeframe: liveSignals.timeframe, status: liveSignals.status })
           .from(liveSignals)
           .where(
             and(
               eq(liveSignals.symbol, signal.symbol),
-              eq(liveSignals.timeframe, signal.timeframe),
-              eq(liveSignals.patternType, signal.pattern),
-              eq(liveSignals.direction, signal.direction),
-              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "paper_only", "outranked"]),
+              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "projected"]),
               gte(liveSignals.createdAt, timeWindow),
             ),
           )
@@ -521,7 +518,7 @@ async function runScanCycle(): Promise<void> {
 
         if (existing.length > 0) {
           console.log(
-            `[Orchestrator] Skipping duplicate signal: ${signal.symbol} ${signal.pattern} ${signal.timeframe} (exists in DB within age window)`,
+            `[Orchestrator] Skipping signal: ${signal.symbol} already has active signal (${existing[0].patternType} ${existing[0].timeframe} ${existing[0].status})`,
           );
           try { pipelineStats.dedupSkipped++; } catch {}
           continue;
