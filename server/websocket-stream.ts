@@ -38,6 +38,18 @@ export function getStreamPrice(symbol: string): number | null {
 }
 
 /**
+ * Sets a price in the cache (used by orchestrator to seed from candle data).
+ * Only updates if no WebSocket price exists or the existing one is stale (>5min).
+ */
+export function setStreamPriceIfStale(symbol: string, price: number): void {
+  const existing = latestPrices.get(symbol) ?? latestPrices.get(symbol.replace(/\//g, ""));
+  const STALE_MS = 5 * 60 * 1000; // 5 minutes
+  if (!existing || (Date.now() - existing.timestamp > STALE_MS)) {
+    latestPrices.set(symbol, { price, timestamp: Date.now() });
+  }
+}
+
+/**
  * Returns all currently tracked prices (for debugging/dashboard).
  */
 export function getAllStreamPrices(): Map<string, { price: number; timestamp: number }> {

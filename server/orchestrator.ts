@@ -16,7 +16,7 @@ import type { PhaseCSignal } from "./screener";
 import { runExitCycle } from "./exit-manager";
 import { runCryptoMonitor } from "./crypto-monitor";
 import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
-import { startPriceStreams, stopPriceStreams } from "./websocket-stream";
+import { startPriceStreams, stopPriceStreams, getStreamPrice, setStreamPriceIfStale } from "./websocket-stream";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 import { selectBestSignals } from "./signal-ranker";
@@ -165,6 +165,7 @@ export let pipelineStats = {
   filledPositions: 0,
   partialExits: 0,
   closedTrades: 0,
+  projectedCount: 0,
 };
 
 // ============================================================
@@ -195,6 +196,48 @@ function isSignalAlreadySent(signal: PhaseCSignal): boolean {
 function markSignalSent(signal: PhaseCSignal): void {
   const key = signal.symbol; // Symbol-only — one signal per symbol
   sentSignals.set(key, Date.now() + SIGNAL_CACHE_TTL_MS);
+}
+
+// ============================================================
+// Proximity Gate — only place orders when price is near projected D
+// ============================================================
+const PROXIMITY_THRESHOLD_PCT = 0.05; // 5% from entry price
+
+/**
+ * Checks if the current market price is within proximity of the signal's
+ * projected D entry price. Only signals near their entry deserve a live
+ * limit order on Alpaca — distant signals waste buying power.
+ *
+ * Threshold: 5% of entry price. A BTC signal at D=$66,000 won't place
+ * an order until BTC is within $69,300 (for long) or $62,700 (for short).
+ */
+function isWithinProximity(signal: PhaseCSignal): boolean {
+  const currentPrice = getStreamPrice(signal.symbol);
+
+  if (currentPrice === null || currentPrice <= 0) {
+    // No price data available — conservative: allow the order
+    console.log(
+      `[Orchestrator] No current price for ${signal.symbol} — allowing order placement (conservative)`,
+    );
+    return true;
+  }
+
+  const entryPrice = signal.limitPrice;
+  const distancePct = Math.abs(currentPrice - entryPrice) / entryPrice;
+
+  if (distancePct <= PROXIMITY_THRESHOLD_PCT) {
+    console.log(
+      `[Orchestrator] ${signal.symbol} within proximity: current=$${currentPrice.toFixed(4)} ` +
+      `entry=$${entryPrice.toFixed(4)} (${(distancePct * 100).toFixed(1)}% away, threshold=${(PROXIMITY_THRESHOLD_PCT * 100)}%)`,
+    );
+    return true;
+  }
+
+  console.log(
+    `[Orchestrator] ${signal.symbol} NOT within proximity: current=$${currentPrice.toFixed(4)} ` +
+    `entry=$${entryPrice.toFixed(4)} (${(distancePct * 100).toFixed(1)}% away > ${(PROXIMITY_THRESHOLD_PCT * 100)}% threshold)`,
+  );
+  return false;
 }
 
 // ============================================================
@@ -378,6 +421,13 @@ async function runScanCycle(): Promise<void> {
     for (const [symbol, datasets] of allCandleData) {
       for (const { candles, timeframe } of datasets) {
         if (candles.length < 20) continue;
+
+        // Seed price cache from latest candle close (fallback when WebSocket has no data)
+        const lastClose = (candles[candles.length - 1] as { close?: number }).close;
+        if (lastClose && lastClose > 0) {
+          setStreamPriceIfStale(symbol, lastClose);
+        }
+
         try {
           const phaseResult = detectPatternPhase(candles, symbol, timeframe);
           await updateScanState(symbol, timeframe, phaseResult);
@@ -587,6 +637,15 @@ async function runScanCycle(): Promise<void> {
             `[Orchestrator] Equity signal saved, order deferred until market open: ${signal.symbol} ${signal.pattern} ${signal.direction}`,
           );
           try { pipelineStats.ordersSkipped++; } catch {}
+        } else if (!isWithinProximity(signal)) {
+          // Price is too far from projected D — save as "projected", don't place order yet
+          // This preserves buying power for signals that are actually close to triggering
+          await db.update(liveSignals).set({ status: "projected" }).where(eq(liveSignals.id, inserted.id));
+          console.log(
+            `[Orchestrator] Signal saved as PROJECTED (price not near D): ${signal.symbol} ${signal.pattern} ` +
+            `${signal.direction} — D=$${signal.limitPrice.toFixed(2)}, proximity threshold not met`,
+          );
+          try { pipelineStats.ordersSkipped++; } catch {}
         } else if (equity !== null) {
           // Pre-check: skip if order notional exceeds available buying power
           // This prevents 403 spam when GTC orders have locked up most cash
@@ -696,17 +755,103 @@ async function runScanCycle(): Promise<void> {
       console.error("[Orchestrator] Stale GTC cleanup failed:", err);
     }
 
+    // ---- Promote projected signals that are now within proximity ----
+    try {
+      const projectedSignals = await db
+        .select()
+        .from(liveSignals)
+        .where(eq(liveSignals.status, "projected"))
+        .limit(50);
+
+      if (projectedSignals.length > 0) {
+        // Fetch fresh equity/buying power for promotion decisions
+        let promoEquity: number | null = null;
+        let promoBuyingPower: number | null = null;
+        try {
+          const acct = await getAccountEquity();
+          promoEquity = acct.equity;
+          promoBuyingPower = acct.buyingPower;
+        } catch { /* equity fetch failed — skip promotions this cycle */ }
+
+        const promoSettings = await getSettings();
+
+        for (const sig of projectedSignals) {
+          const sigIsCrypto = sig.symbol.includes("/");
+          const entryPrice = Number(sig.entryPrice);
+          const currentPrice = getStreamPrice(sig.symbol);
+
+          if (currentPrice === null || currentPrice <= 0) continue;
+
+          const distancePct = Math.abs(currentPrice - entryPrice) / entryPrice;
+          if (distancePct > PROXIMITY_THRESHOLD_PCT) continue;
+
+          // Price is now close — check market hours for equities
+          if (!sigIsCrypto && !isStockMarketOpen()) continue;
+
+          if (!promoSettings.tradingEnabled || promoEquity === null) continue;
+
+          // Check buying power
+          const allocation = sigIsCrypto ? promoSettings.cryptoAllocation : promoSettings.equityAllocation;
+          const notional = promoEquity * allocation;
+          if (promoBuyingPower !== null && notional > promoBuyingPower) {
+            console.warn(`[Orchestrator] Cannot promote ${sig.symbol}: insufficient buying power`);
+            continue;
+          }
+
+          try {
+            const order = await placePhaseCLimitOrder(
+              {
+                symbol: sig.symbol,
+                timeframe: sig.timeframe as "1D" | "4H",
+                pattern: sig.patternType,
+                direction: sig.direction as "long" | "short",
+                limitPrice: entryPrice,
+                projectedD: entryPrice,
+                stopLossPrice: Number(sig.stopLossPrice),
+                tp1Price: Number(sig.tp1Price),
+                tp2Price: Number(sig.tp2Price),
+                xPrice: Number(sig.xPrice),
+                aPrice: Number(sig.aPrice),
+                bPrice: Number(sig.bPrice),
+                cPrice: Number(sig.cPrice),
+              } as PhaseCSignal,
+              promoEquity,
+              sigIsCrypto,
+              { equity: promoSettings.equityAllocation, crypto: promoSettings.cryptoAllocation },
+              promoBuyingPower ?? undefined,
+            );
+
+            await db.update(liveSignals).set({
+              status: "pending",
+              entryOrderId: order.id,
+            }).where(eq(liveSignals.id, sig.id));
+
+            console.log(
+              `[Orchestrator] PROMOTED projected → pending: ${sig.symbol} ${sig.patternType} ` +
+              `(price now ${(distancePct * 100).toFixed(1)}% from D) — order placed`,
+            );
+            try { pipelineStats.ordersPlaced++; } catch {}
+          } catch (err) {
+            console.error(`[Orchestrator] Failed to promote ${sig.symbol}:`, err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[Orchestrator] Projected promotion check failed:", err);
+    }
+
     // ---- Pipeline stats: final status counts from DB ----
     try {
       pipelineStats.exitCycleRan = true;
       const allActive = await db
         .select({ status: liveSignals.status })
         .from(liveSignals)
-        .where(inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "paper_only"]));
+        .where(inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "paper_only", "projected"]));
       pipelineStats.pendingFills = allActive.filter((r) => r.status === "pending" || r.status === "paper_only").length;
       pipelineStats.filledPositions = allActive.filter((r) => r.status === "filled").length;
       pipelineStats.partialExits = allActive.filter((r) => r.status === "partial_exit").length;
       pipelineStats.closedTrades = allActive.filter((r) => r.status === "closed").length;
+      pipelineStats.projectedCount = allActive.filter((r) => r.status === "projected").length;
       pipelineStats.lastUpdated = Date.now();
     } catch (err) {
       console.error("[Orchestrator] Pipeline stats query failed (non-fatal):", err);
