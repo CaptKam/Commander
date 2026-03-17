@@ -194,6 +194,36 @@ interface WatchlistItem {
   assetClass: string;
 }
 
+interface SignalPipelineEntry {
+  id: number;
+  symbol: string;
+  pattern: string;
+  timeframe: string;
+  direction: string;
+  status: string;
+  stage: string;
+  stageDetail: string;
+  stageColor: string;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  score: number | null;
+  entryOrderId: string | null;
+  hasOrder: boolean;
+  detectedAt: string;
+  filledAt: string | null;
+  blockedReason: string | null;
+}
+
+interface SignalPipelineData {
+  signals: SignalPipelineEntry[];
+  summary: {
+    total: number;
+    byStage: Record<string, number>;
+  };
+}
+
 // ============================================================
 // Constants & helpers
 // ============================================================
@@ -241,7 +271,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
-  const [bottomTab, setBottomTab] = useState<"feed" | "pipeline" | "scanner" | "signals">("feed");
+  const [activePage, setActivePage] = useState<"dashboard" | "pipeline" | "scanner" | "diagnostics" | "feed" | "signals">("dashboard");
   const [signalPipeline, setSignalPipeline] = useState<SignalPipelineData | null>(null);
 
   const fetchAll = useCallback(async () => {
@@ -272,7 +302,7 @@ export default function App() {
       if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value)) setWatchlist(wlRes.value);
       if (pipeRes.status === "fulfilled") setPipeline(pipeRes.value);
       if (ssRes.status === "fulfilled") setScanState(ssRes.value);
-      if (spRes.status === "fulfilled" && spRes.value?.signals) setSignalPipeline(spRes.value);
+      if (spRes.status === "fulfilled") setSignalPipeline(spRes.value);
     } catch {
     } finally {
       setLoading(false);
@@ -467,6 +497,7 @@ export default function App() {
           {([
             { key: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
             { key: "feed" as const, icon: Radio, label: "Feed" },
+            { key: "signals" as const, icon: Zap, label: "Signals" },
             { key: "pipeline" as const, icon: Activity, label: "Pipeline" },
             { key: "scanner" as const, icon: Radar, label: "Scanner" },
             { key: "diagnostics" as const, icon: Stethoscope, label: "Diagnostics" },
@@ -790,6 +821,13 @@ export default function App() {
             </div>
           )}
 
+          {/* ============ SIGNALS PAGE ============ */}
+          {activePage === "signals" && (
+            <div className="flex-1 overflow-y-auto">
+              <SignalPipelineView data={signalPipeline} />
+            </div>
+          )}
+
           {/* ============ PIPELINE PAGE ============ */}
           {activePage === "pipeline" && (
             <div className="flex-1 overflow-y-auto">
@@ -820,7 +858,7 @@ export default function App() {
 // Scan Pipeline
 // ============================================================
 // ============================================================
-// Signal Pipeline View — lifecycle status of every signal
+// Signal Pipeline View — lifecycle stage for every signal
 // ============================================================
 const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
   "Detected":      { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
@@ -927,7 +965,7 @@ function SignalPipelineView({ data }: { data: SignalPipelineData | null }) {
       </div>
 
       {/* Signal table */}
-      <div className="overflow-y-auto" style={{ maxHeight: "calc(100% - 36px)" }}>
+      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 120px)" }}>
         <table className="w-full text-[10px]" style={{ fontFamily: MONO }}>
           <thead>
             <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border-color)" }}>
@@ -1002,6 +1040,9 @@ function SignalPipelineView({ data }: { data: SignalPipelineData | null }) {
   );
 }
 
+// ============================================================
+// Scan Pipeline
+// ============================================================
 function ScanPipeline({ data }: { data: PipelineData | null }) {
   const [openSteps, setOpenSteps] = useState<Set<number>>(new Set([1]));
 
