@@ -743,6 +743,18 @@ async function runScanCycle(): Promise<void> {
         const catchupEquity = equityData?.equity ?? null;
         const catchupBp = equityData?.buyingPower ?? null;
 
+        const existingOrderSymbols = new Set<string>();
+        try {
+          const alpacaBase = (process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets").replace(/\/v2\/?$/, "");
+          const orderRes = await fetch(`${alpacaBase}/v2/orders?status=open&limit=500`, {
+            headers: { "APCA-API-KEY-ID": process.env.ALPACA_API_KEY!, "APCA-API-SECRET-KEY": process.env.ALPACA_API_SECRET! },
+          });
+          if (orderRes.ok) {
+            const openOrders = await orderRes.json() as any[];
+            for (const o of openOrders) existingOrderSymbols.add(o.symbol);
+          }
+        } catch {}
+
         let placed = 0;
         let skipped = 0;
         for (const sig of pendingNoOrder) {
@@ -751,6 +763,12 @@ async function runScanCycle(): Promise<void> {
 
             if (isCrypto && sig.direction === "short") {
               await db.update(liveSignals).set({ status: "paper_only" }).where(eq(liveSignals.id, sig.id));
+              skipped++;
+              continue;
+            }
+
+            const alpacaSymbol = sig.symbol.replace("/", "");
+            if (existingOrderSymbols.has(alpacaSymbol) || existingOrderSymbols.has(sig.symbol)) {
               skipped++;
               continue;
             }
@@ -801,6 +819,7 @@ async function runScanCycle(): Promise<void> {
             await db.update(liveSignals)
               .set({ entryOrderId: order.id })
               .where(eq(liveSignals.id, sig.id));
+            existingOrderSymbols.add(alpacaSymbol);
             placed++;
             console.log(`[Catchup] Order placed for ${sig.symbol} ${sig.patternType} ${sig.direction} (id=${order.id})`);
           } catch (err) {
