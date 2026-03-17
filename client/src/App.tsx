@@ -228,7 +228,8 @@ interface SignalPipelineData {
 // Constants & helpers
 // ============================================================
 const POLL_INTERVAL = 10_000;
-const MONO = "'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+const MONO = "'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, monospace";
+const DISPLAY = "'Inter', 'SF Pro Display', system-ui, sans-serif";
 
 function fmt(n: number): string {
   const abs = Math.abs(n);
@@ -350,7 +351,7 @@ export default function App() {
       events.push({
         time: t.filled_at,
         tag: "FILL",
-        color: "var(--accent-green)",
+        color: "var(--positive)",
         text: `${(t.direction ?? "").toUpperCase()} ${t.symbol} ${t.pattern ?? "?"} ${(t.qty ?? 0).toFixed(2)} @ ${fmt(t.filled_price)}`,
       });
     });
@@ -362,7 +363,7 @@ export default function App() {
       events.push({
         time: s.createdAt,
         tag: "NEAR",
-        color: dist < 2 ? "var(--accent-amber)" : "var(--text-main)",
+        color: dist < 2 ? "var(--warning)" : "var(--text-primary)",
         text: label + suffix,
       });
     });
@@ -379,7 +380,7 @@ export default function App() {
         events.push({
           time: s.createdAt,
           tag: "SIGNAL",
-          color: "var(--accent-amber)",
+          color: "var(--warning)",
           text: `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} @ ${fmt(Number(s.entryPrice))} — ${s.status}`,
         });
       }
@@ -401,60 +402,81 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg-main)" }}>
-        <Zap className="w-8 h-8 animate-pulse" style={{ color: "var(--accent-green)" }} />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg-primary)" }}>
+        <div className="flex flex-col items-center gap-3">
+          <Zap className="w-8 h-8 animate-pulse" style={{ color: "var(--atlas-light)" }} />
+          <span style={{ fontFamily: DISPLAY, fontSize: "11px", fontWeight: 500, letterSpacing: "2px", textTransform: "uppercase" as const, color: "var(--atlas-light)" }}>
+            ATLAS
+          </span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "var(--bg-main)", fontFamily: MONO, fontSize: "11px" }}>
+    <div className="h-screen flex flex-col overflow-hidden terminal-bg" style={{ background: "var(--bg-primary)", fontFamily: MONO, fontSize: "11px" }}>
       {/* ================================================================ */}
-      {/* HEADER BAR — P&L front and center                                */}
+      {/* HEADER BAR — Hedge fund terminal aesthetic                        */}
       {/* ================================================================ */}
-      <header className="shrink-0 flex items-center justify-between px-4 h-10 border-b" style={{ borderColor: "var(--border-color)" }}>
-        <div className="flex items-center gap-4">
-          <span className="text-xs font-bold text-white tracking-widest">FTM COMMANDER</span>
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: status?.status === "online" ? "#22c55e" : "#ef4444", boxShadow: status?.status === "online" ? "0 0 4px rgba(34,197,94,0.6)" : undefined }} />
+      <header className="shrink-0 flex items-center justify-between px-4 h-11 border-b" style={{ borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
+        <div className="flex items-center gap-3">
+          <span style={{ fontFamily: DISPLAY, fontSize: "13px", fontWeight: 600, letterSpacing: "2px", textTransform: "uppercase" as const, color: "var(--atlas-light)" }}>
+            FTM
+          </span>
+          <span style={{ fontFamily: DISPLAY, fontSize: "10px", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase" as const, color: "var(--text-muted)" }}>
+            ATLAS
+          </span>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{
+              background: status?.status === "online" ? "var(--atlas-primary)" : "var(--negative)",
+              boxShadow: status?.status === "online" ? "0 0 6px var(--atlas-primary)" : "0 0 6px var(--negative)",
+            }} />
+            <span className="text-[8px] uppercase tracking-wider" style={{ color: status?.status === "online" ? "var(--atlas-light)" : "var(--negative)", fontFamily: DISPLAY }}>
+              {status?.status === "online" ? "online" : "offline"}
+            </span>
+          </div>
         </div>
 
-        {/* P&L — the most important number */}
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <span style={{ color: "var(--text-muted)" }}>P&L</span>
-            <span className="text-sm font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+            <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>P&L</span>
+            <span className="font-semibold" style={{ fontSize: "14px", color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
               {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
             </span>
-            <span className="text-[10px]" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+            <span className="text-[10px]" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)", opacity: 0.7 }}>
               ({totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%)
             </span>
           </div>
-          <span style={{ color: "var(--border-color)" }}>|</span>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
           <div className="flex items-center gap-2">
-            <span style={{ color: "var(--text-muted)" }}>Day</span>
+            <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>Day</span>
             <span style={{ color: (account?.daily_pl ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
               {(account?.daily_pl ?? 0) >= 0 ? "+" : ""}{fmt(account?.daily_pl ?? 0)}
             </span>
           </div>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>Equity</span>
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{fmt(equity)}</span>
+          </div>
         </div>
 
-        {/* Controls */}
         <div className="flex items-center gap-2">
           {botSettings && (
             <button
               onClick={() => updateSettings({ trading_enabled: !botSettings.trading_enabled })}
-              className="flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[9px] font-semibold uppercase tracking-wider transition-all"
               style={botSettings.trading_enabled
-                ? { background: "var(--accent-green-dim)", color: "var(--accent-green)", borderColor: "#166534" }
-                : { background: "var(--accent-red-dim)", color: "var(--accent-red)", borderColor: "rgba(127,29,29,0.5)" }}
+                ? { background: "var(--atlas-bg)", color: "var(--atlas-light)", border: "0.5px solid var(--atlas-border)" }
+                : { background: "var(--accent-red-dim)", color: "var(--accent-red)", border: "0.5px solid rgba(239, 68, 68, 0.20)" }}
             >
               <Power className="w-3 h-3" />
-              {botSettings.trading_enabled ? "ON" : "OFF"}
+              {botSettings.trading_enabled ? "LIVE" : "OFF"}
             </button>
           )}
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider"
-            style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)", borderColor: "rgba(127,29,29,0.5)" }}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-semibold uppercase tracking-wider transition-all"
+            style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)", border: "0.5px solid rgba(239, 68, 68, 0.20)" }}
             onClick={async () => {
               if (botSettings?.trading_enabled && confirm("Disable auto-trading?")) {
                 await updateSettings({ trading_enabled: false });
@@ -466,11 +488,11 @@ export default function App() {
           </button>
           <button
             onClick={() => setSettingsOpen((o) => !o)}
-            className="w-7 h-7 rounded flex items-center justify-center border"
+            className="w-7 h-7 rounded-md flex items-center justify-center transition-all"
             style={{
-              background: settingsOpen ? "var(--accent-green-dim)" : "var(--bg-panel)",
-              borderColor: settingsOpen ? "#166534" : "var(--border-color)",
-              color: settingsOpen ? "var(--accent-green)" : "var(--text-muted)",
+              background: settingsOpen ? "var(--atlas-bg)" : "transparent",
+              border: settingsOpen ? "0.5px solid var(--atlas-border)" : "0.5px solid var(--border-default)",
+              color: settingsOpen ? "var(--atlas-light)" : "var(--text-muted)",
             }}
           >
             <Settings className="w-3.5 h-3.5" />
@@ -492,31 +514,32 @@ export default function App() {
       {/* MAIN BODY — left nav sidebar + page content                       */}
       {/* ================================================================ */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT NAV SIDEBAR */}
-        <nav className="shrink-0 flex flex-col items-center py-2 gap-1 border-r" style={{ width: 52, borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+        <nav className="shrink-0 flex flex-col items-center py-3 gap-1.5 border-r" style={{ width: 56, borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
+          <div className="accent-bar mb-2" style={{ width: 24 }} />
           {([
-            { key: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
+            { key: "dashboard" as const, icon: LayoutDashboard, label: "Dash" },
             { key: "feed" as const, icon: Radio, label: "Feed" },
-            { key: "signals" as const, icon: Zap, label: "Signals" },
-            { key: "pipeline" as const, icon: Activity, label: "Pipeline" },
-            { key: "scanner" as const, icon: Radar, label: "Scanner" },
-            { key: "diagnostics" as const, icon: Stethoscope, label: "Diagnostics" },
+            { key: "signals" as const, icon: Zap, label: "Sigs" },
+            { key: "pipeline" as const, icon: Activity, label: "Pipe" },
+            { key: "scanner" as const, icon: Radar, label: "Scan" },
+            { key: "diagnostics" as const, icon: Stethoscope, label: "Diag" },
           ] as const).map((item) => {
             const active = activePage === item.key;
             return (
               <button
                 key={item.key}
                 onClick={() => setActivePage(item.key)}
-                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors"
+                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all"
                 style={{
-                  background: active ? "var(--accent-green-dim)" : "transparent",
-                  color: active ? "var(--accent-green)" : "var(--text-muted)",
-                  border: active ? "1px solid #166534" : "1px solid transparent",
+                  background: active ? "var(--atlas-bg)" : "transparent",
+                  color: active ? "var(--atlas-light)" : "var(--text-muted)",
+                  border: active ? "0.5px solid var(--atlas-border)" : "0.5px solid transparent",
+                  boxShadow: active ? "var(--atlas-glow)" : "none",
                 }}
                 title={item.label}
               >
                 <item.icon className="w-4 h-4" />
-                <span className="text-[7px] uppercase tracking-wider font-semibold leading-none">{item.label.slice(0, 5)}</span>
+                <span className="text-[7px] uppercase tracking-wider font-semibold leading-none" style={{ fontFamily: DISPLAY }}>{item.label}</span>
               </button>
             );
           })}
@@ -529,8 +552,8 @@ export default function App() {
             <>
               <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
                 {/* BLOTTER */}
-                <div className="shrink-0 flex items-center justify-between px-3 h-7 border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-                  <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
+                <div className="shrink-0 flex items-center justify-between px-3 h-8 border-b" style={{ borderColor: "var(--border-default)", background: "var(--bg-card)" }}>
+                  <span className="text-[9px] uppercase tracking-widest font-medium" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
                     Positions ({positions.length})
                   </span>
                   <div className="flex gap-2">
@@ -540,8 +563,8 @@ export default function App() {
                         onClick={() => setBlotterSort(s)}
                         className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded"
                         style={blotterSort === s
-                          ? { color: "var(--accent-green)", background: "var(--accent-green-dim)" }
-                          : { color: "var(--text-muted)" }}
+                          ? { color: "var(--atlas-light)", background: "var(--atlas-bg)", border: "0.5px solid var(--atlas-border)" }
+                          : { color: "var(--text-muted)", border: "0.5px solid transparent" }}
                       >
                         {s === "pnl" ? "P&L" : s === "pct" ? "%" : "A-Z"}
                       </button>
@@ -617,10 +640,9 @@ export default function App() {
                 </div>
               </div>
 
-              {/* RIGHT SIDEBAR — risk, stats, alerts */}
-              <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
-                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
+              <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-card)" }}>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-default)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Risk</div>
                   <Row label="Equity" value={fmt(equity)} />
                   <Row label="Buying Power" value={fmt(bp)} />
                   <Row label="Cash" value={fmt(account?.cash ?? bp)} />
@@ -643,8 +665,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-default)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Stats</div>
                   <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
                   <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
                   <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
@@ -653,8 +675,8 @@ export default function App() {
                   <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
                 </div>
 
-                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-default)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
                     Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 2).length})
                   </div>
                   {approaching.filter((s) => (s.distancePct ?? 0) <= 2).length === 0 ? (
@@ -669,8 +691,8 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Alerts</div>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-default)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Alerts</div>
                   {alerts.map((a, i) => (
                     <div key={i} className="flex items-center gap-2 py-0.5">
                       <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{
@@ -684,7 +706,7 @@ export default function App() {
                 </div>
 
                 <div className="px-3 py-3 flex-1">
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
                     Recent Fills ({history.length})
                   </div>
                   {history.slice(0, 10).map((t, i) => (
@@ -719,7 +741,7 @@ export default function App() {
           {activePage === "feed" && (
             <div className="flex-1 overflow-y-auto">
               <div className="px-4 py-3">
-                <div className="text-[9px] uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--accent-green)" }}>
+                <div className="text-[9px] uppercase tracking-widest font-medium mb-3" style={{ color: "var(--atlas-light)", fontFamily: DISPLAY }}>
                   Live Event Feed ({feed.length})
                 </div>
                 {feed.map((e, i) => (
@@ -730,16 +752,16 @@ export default function App() {
                     <span
                       className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
                       style={{
-                        background: e.tag === "FILL" ? "var(--accent-green-dim)"
+                        background: e.tag === "FILL" ? "var(--atlas-bg)"
                           : e.tag === "REJECT" ? "var(--accent-red-dim)"
-                          : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
-                          : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
-                          : "rgba(205,166,97,0.15)",
-                        color: e.tag === "FILL" ? "var(--accent-green)"
-                          : e.tag === "REJECT" ? "var(--accent-red)"
-                          : e.tag === "NEAR" ? "var(--accent-amber)"
+                          : e.tag === "NEAR" ? "var(--oracle-bg)"
+                          : e.tag === "CLOSED" ? "rgba(255,255,255,0.04)"
+                          : "var(--oracle-bg)",
+                        color: e.tag === "FILL" ? "var(--atlas-light)"
+                          : e.tag === "REJECT" ? "var(--negative)"
+                          : e.tag === "NEAR" ? "var(--oracle-light)"
                           : e.tag === "CLOSED" ? "var(--text-muted)"
-                          : "var(--accent-amber)",
+                          : "var(--oracle-light)",
                       }}
                     >
                       {e.tag}
@@ -787,16 +809,16 @@ export default function App() {
 // Signal Pipeline View — lifecycle stage for every signal
 // ============================================================
 const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
-  "Detected":      { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
-  "Outranked":     { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
-  "Paper Only":    { bg: "rgba(205,166,97,0.15)",  fg: "var(--accent-amber)" },
-  "Market Closed": { bg: "rgba(205,166,97,0.15)",  fg: "var(--accent-amber)" },
-  "Order Placed":  { bg: "rgba(249,115,22,0.15)",  fg: "#fb923c" },
-  "Filled":        { bg: "rgba(59,130,246,0.15)",  fg: "#60a5fa" },
-  "Exiting":       { bg: "rgba(59,130,246,0.15)",  fg: "#60a5fa" },
-  "Closed":        { bg: "rgba(103,194,152,0.15)", fg: "var(--accent-green)" },
-  "Expired":       { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
-  "Dismissed":     { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
+  "Detected":      { bg: "rgba(139, 92, 246, 0.10)", fg: "#a78bfa" },
+  "Outranked":     { bg: "rgba(255,255,255,0.04)", fg: "var(--text-muted)" },
+  "Paper Only":    { bg: "rgba(245, 158, 11, 0.10)",  fg: "#fbbf24" },
+  "Market Closed": { bg: "rgba(245, 158, 11, 0.10)",  fg: "#fbbf24" },
+  "Order Placed":  { bg: "rgba(249,115,22,0.10)",  fg: "#fb923c" },
+  "Filled":        { bg: "rgba(59,130,246,0.10)",  fg: "#60a5fa" },
+  "Exiting":       { bg: "rgba(59,130,246,0.10)",  fg: "#60a5fa" },
+  "Closed":        { bg: "rgba(16, 185, 129, 0.10)", fg: "var(--atlas-light)" },
+  "Expired":       { bg: "rgba(255,255,255,0.04)", fg: "var(--text-muted)" },
+  "Dismissed":     { bg: "rgba(255,255,255,0.04)", fg: "var(--text-muted)" },
 };
 
 function relativeTime(iso: string): string {
@@ -837,16 +859,16 @@ function SignalPipelineView({ data }: { data: SignalPipelineData | null }) {
   });
 
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
-      {/* Summary bar */}
-      <div className="flex items-center gap-1 px-3 py-2 flex-wrap border-b" style={{ borderColor: "var(--border-color)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
+      <div className="flex items-center gap-1 px-3 py-2 flex-wrap border-b" style={{ borderColor: "var(--border-default)" }}>
         <button
           onClick={() => setStageFilter(null)}
           className="text-[8px] px-1.5 py-0.5 rounded font-semibold uppercase"
           style={{
-            background: !stageFilter ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
-            color: !stageFilter ? "var(--accent-green)" : "var(--text-muted)",
-            border: "none", cursor: "pointer",
+            background: !stageFilter ? "var(--atlas-bg)" : "rgba(255,255,255,0.04)",
+            color: !stageFilter ? "var(--atlas-light)" : "var(--text-muted)",
+            border: !stageFilter ? "0.5px solid var(--atlas-border)" : "0.5px solid transparent",
+            cursor: "pointer",
           }}
         >
           All {data.summary.total}
@@ -1171,18 +1193,18 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
     },
   ];
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
       <div className="p-4">
         {steps.map((step, i) => (
           <div key={step.num} className="flex gap-3" style={{ paddingBottom: i < steps.length - 1 ? 4 : 0 }}>
-            {/* Vertical line + dot */}
             <div className="flex flex-col items-center" style={{ width: 28 }}>
               <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 border cursor-pointer"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 cursor-pointer transition-all"
                 style={{
-                  background: step.active ? "var(--accent-green-dim)" : "var(--bg-panel)",
-                  borderColor: step.active ? "#166534" : "var(--border-color)",
-                  color: step.active ? "var(--accent-green)" : "var(--text-muted)",
+                  background: step.active ? "var(--atlas-bg)" : "var(--bg-card)",
+                  border: step.active ? "0.5px solid var(--atlas-border)" : "0.5px solid var(--border-default)",
+                  color: step.active ? "var(--atlas-light)" : "var(--text-muted)",
+                  boxShadow: step.active ? "var(--atlas-glow)" : "none",
                 }}
                 onClick={() => toggle(step.num)}
               >
@@ -1199,7 +1221,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
                 onClick={() => toggle(step.num)}
                 style={{ marginTop: 3 }}
               >
-                <span className="text-xs font-semibold" style={{ color: isOpen(step.num) ? "var(--accent-green)" : "var(--text-main)" }}>
+                <span className="text-xs font-semibold" style={{ color: isOpen(step.num) ? "var(--atlas-light)" : "var(--text-primary)", fontFamily: DISPLAY }}>
                   {step.name}
                 </span>
                 <span className="text-[9px] px-1.5 py-0.5 rounded" style={{
@@ -1228,10 +1250,10 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
 
 function PipeMetric({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="rounded-md p-2" style={{ background: "var(--bg-main)", border: "0.5px solid var(--border-color)" }}>
-      <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{label}</div>
-      <div className="text-sm font-bold" style={{ color: color || "white", fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      {sub && <div className="text-[8px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sub}</div>}
+    <div className="rounded-lg p-2" style={{ background: "var(--bg-primary)", border: "0.5px solid var(--border-default)" }}>
+      <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", fontFamily: DISPLAY }}>{label}</div>
+      <div className="text-sm font-semibold" style={{ color: color || "var(--text-primary)" }}>{value}</div>
+      {sub && <div className="text-[8px] mt-0.5" style={{ color: "var(--text-dim)" }}>{sub}</div>}
     </div>
   );
 }
@@ -1278,7 +1300,7 @@ function ScanStateView({ data }: { data: ScanStateData | null }) {
   };
 
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
       <div className="px-4 py-3">
         {/* Universe summary row */}
         <div className="flex items-center gap-2 mb-2">
@@ -1348,7 +1370,7 @@ function ScanStateView({ data }: { data: ScanStateData | null }) {
         {/* Hot symbols */}
         {data.hotSymbols.length > 0 && (
           <div>
-            <div className="text-[9px] uppercase tracking-wider font-semibold mb-2" style={{ color: "var(--accent-green)" }}>
+            <div className="text-[9px] uppercase tracking-wider font-medium mb-2" style={{ color: "var(--atlas-light)", fontFamily: DISPLAY }}>
               Hot symbols
             </div>
             <div className="space-y-1">
@@ -1489,28 +1511,28 @@ function DiagnosticsView() {
   }
 
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
       <div className="px-4 py-3">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--accent-green)" }}>
+          <span className="text-[9px] uppercase tracking-widest font-medium" style={{ color: "var(--atlas-light)", fontFamily: DISPLAY }}>
             System Diagnostics
           </span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAutoRefresh(p => !p)}
-              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
+              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded-md"
               style={{
-                borderColor: autoRefresh ? "#166534" : "var(--border-color)",
-                color: autoRefresh ? "var(--accent-green)" : "var(--text-muted)",
-                background: autoRefresh ? "var(--accent-green-dim)" : "transparent",
+                border: autoRefresh ? "0.5px solid var(--atlas-border)" : "0.5px solid var(--border-default)",
+                color: autoRefresh ? "var(--atlas-light)" : "var(--text-muted)",
+                background: autoRefresh ? "var(--atlas-bg)" : "transparent",
               }}
             >
               {autoRefresh ? "Auto 15s" : "Paused"}
             </button>
             <button
               onClick={fetchDiag}
-              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
-              style={{ borderColor: "var(--border-color)", color: "var(--accent-green)", background: "transparent" }}
+              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded-md"
+              style={{ border: "0.5px solid var(--atlas-border)", color: "var(--atlas-light)", background: "transparent" }}
             >
               Refresh
             </button>
@@ -1699,8 +1721,8 @@ function DiagnosticsView() {
 
 function DiagSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-md p-2" style={{ background: "var(--bg-main)", border: "0.5px solid var(--border-color)" }}>
-      <div className="text-[8px] uppercase tracking-wider font-semibold mb-1.5" style={{ color: "var(--text-muted)" }}>{title}</div>
+    <div className="rounded-lg p-2.5 card-glow transition-all" style={{ background: "var(--bg-primary)", border: "0.5px solid var(--border-default)" }}>
+      <div className="text-[8px] uppercase tracking-wider font-medium mb-1.5" style={{ color: "var(--text-secondary)", fontFamily: "'Inter', sans-serif" }}>{title}</div>
       {children}
     </div>
   );
@@ -1711,8 +1733,8 @@ function DiagRow({ label, value, color, sub }: { label: string; value: string; c
     <div className="flex justify-between items-baseline py-px">
       <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{label}</span>
       <div className="flex items-baseline gap-1">
-        {sub && <span className="text-[8px]" style={{ color: "var(--text-muted)", opacity: 0.6 }}>{sub}</span>}
-        <span className="text-[9px] font-semibold" style={{ color: color ?? "white" }}>{value}</span>
+        {sub && <span className="text-[8px]" style={{ color: "var(--text-dim)", opacity: 0.6 }}>{sub}</span>}
+        <span className="text-[9px] font-semibold" style={{ color: color ?? "var(--text-primary)" }}>{value}</span>
       </div>
     </div>
   );
@@ -1725,7 +1747,7 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
   return (
     <div className="flex justify-between py-0.5">
       <span style={{ color: "var(--text-muted)" }}>{label}</span>
-      <span className="font-semibold" style={{ color: color || "white" }}>{value}</span>
+      <span className="font-semibold" style={{ color: color || "var(--text-primary)" }}>{value}</span>
     </div>
   );
 }
@@ -1762,10 +1784,9 @@ function SettingsDrawer({
   };
 
   return (
-    <div className="shrink-0 border-b px-4 py-3 flex gap-8 overflow-x-auto" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-      {/* Patterns */}
+    <div className="shrink-0 border-b px-4 py-3 flex gap-8 overflow-x-auto" style={{ borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
       <div>
-        <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Patterns</div>
+        <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Patterns</div>
         <div className="flex gap-1.5">
           {(["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"] as const).map((p) => {
             const on = botSettings?.enabled_patterns?.includes(p) ?? true;
@@ -1779,8 +1800,8 @@ function SettingsDrawer({
                 }}
                 className="px-2 py-1 rounded border text-[10px] transition-colors"
                 style={on
-                  ? { background: "var(--accent-green-dim)", color: "var(--accent-green)", borderColor: "#166534" }
-                  : { background: "var(--bg-main)", color: "var(--text-muted)", borderColor: "var(--border-color)" }}
+                  ? { background: "var(--atlas-bg)", color: "var(--atlas-light)", border: "0.5px solid var(--atlas-border)" }
+                  : { background: "var(--bg-primary)", color: "var(--text-muted)", border: "0.5px solid var(--border-default)" }}
               >
                 {p}
               </button>
@@ -1792,7 +1813,7 @@ function SettingsDrawer({
       {/* Sizing */}
       {botSettings && (
         <div className="min-w-[200px]">
-          <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Sizing</div>
+          <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Sizing</div>
           <div className="flex items-center gap-2 text-[10px]">
             <span style={{ color: "var(--text-muted)" }}>STK</span>
             <input type="range" min="1" max="20" value={Math.round(botSettings.equity_allocation * 100)}
@@ -1812,7 +1833,7 @@ function SettingsDrawer({
 
       {/* Watchlist */}
       <div className="min-w-[300px]">
-        <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+        <div className="text-[9px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
           Watchlist ({watchlist.length})
         </div>
         <div className="flex gap-1.5 mb-2">
