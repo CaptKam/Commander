@@ -5,6 +5,11 @@ import {
   XCircle,
   Plus,
   Zap,
+  LayoutDashboard,
+  Activity,
+  Radar,
+  Stethoscope,
+  Radio,
 } from "lucide-react";
 
 // ============================================================
@@ -206,7 +211,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
-  const [bottomTab, setBottomTab] = useState<"feed" | "pipeline" | "scanner" | "diagnostics">("feed");
+  const [activePage, setActivePage] = useState<"dashboard" | "pipeline" | "scanner" | "diagnostics" | "feed">("dashboard");
 
   const fetchAll = useCallback(async () => {
     try {
@@ -421,321 +426,317 @@ export default function App() {
       )}
 
       {/* ================================================================ */}
-      {/* MAIN BODY — two columns                                          */}
+      {/* MAIN BODY — left nav sidebar + page content                       */}
       {/* ================================================================ */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: blotter + feed (70%) */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
+        {/* LEFT NAV SIDEBAR */}
+        <nav className="shrink-0 flex flex-col items-center py-2 gap-1 border-r" style={{ width: 52, borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+          {([
+            { key: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
+            { key: "feed" as const, icon: Radio, label: "Feed" },
+            { key: "pipeline" as const, icon: Activity, label: "Pipeline" },
+            { key: "scanner" as const, icon: Radar, label: "Scanner" },
+            { key: "diagnostics" as const, icon: Stethoscope, label: "Diagnostics" },
+          ] as const).map((item) => {
+            const active = activePage === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setActivePage(item.key)}
+                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors"
+                style={{
+                  background: active ? "var(--accent-green-dim)" : "transparent",
+                  color: active ? "var(--accent-green)" : "var(--text-muted)",
+                  border: active ? "1px solid #166534" : "1px solid transparent",
+                }}
+                title={item.label}
+              >
+                <item.icon className="w-4 h-4" />
+                <span className="text-[7px] uppercase tracking-wider font-semibold leading-none">{item.label.slice(0, 5)}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-          {/* BLOTTER */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="shrink-0 flex items-center justify-between px-3 h-7 border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-              <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
-                Positions ({positions.length})
-              </span>
-              <div className="flex gap-2">
-                {(["pnl", "pct", "symbol"] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setBlotterSort(s)}
-                    className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded"
-                    style={blotterSort === s
-                      ? { color: "var(--accent-green)", background: "var(--accent-green-dim)" }
-                      : { color: "var(--text-muted)" }}
-                  >
-                    {s === "pnl" ? "P&L" : s === "pct" ? "%" : "A-Z"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Column headers */}
-            <div className="shrink-0 grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1 text-[9px] uppercase tracking-wider border-b"
-              style={{ borderColor: "var(--border-color)", color: "var(--text-muted)", background: "var(--bg-main)" }}>
-              <div>Symbol</div>
-              <div>Side</div>
-              <div className="text-right">Qty</div>
-              <div className="text-right">Entry</div>
-              <div className="text-right">Last</div>
-              <div className="text-right">SL</div>
-              <div className="text-right">TP1</div>
-              <div className="text-right">TP2</div>
-              <div className="text-right">P&L</div>
-            </div>
-
-            {/* Rows */}
-            <div className="flex-1 overflow-y-auto">
-              {sortedPositions.length === 0 ? (
-                <div className="px-3 py-6 text-center" style={{ color: "var(--text-muted)" }}>
-                  No open positions
-                </div>
-              ) : (
-                sortedPositions.map((p) => (
-                  <div
-                    key={p.symbol}
-                    className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-b items-center"
-                    style={{ borderColor: "rgba(255,255,255,0.03)" }}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-white font-semibold truncate">{p.symbol}</span>
-                      {p.pattern && <span className="text-[9px] truncate" style={{ color: "var(--accent-amber)" }}>{p.pattern}</span>}
-                    </div>
-                    <div>
-                      <span
-                        className="text-[9px] px-1 py-px rounded uppercase font-semibold"
-                        style={{
-                          background: p.side === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                          color: p.side === "long" ? "var(--accent-green)" : "var(--accent-red)",
-                        }}
+        {/* PAGE CONTENT */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* ============ DASHBOARD PAGE ============ */}
+          {activePage === "dashboard" && (
+            <>
+              <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
+                {/* BLOTTER */}
+                <div className="shrink-0 flex items-center justify-between px-3 h-7 border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+                  <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
+                    Positions ({positions.length})
+                  </span>
+                  <div className="flex gap-2">
+                    {(["pnl", "pct", "symbol"] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setBlotterSort(s)}
+                        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded"
+                        style={blotterSort === s
+                          ? { color: "var(--accent-green)", background: "var(--accent-green-dim)" }
+                          : { color: "var(--text-muted)" }}
                       >
-                        {p.side}
-                      </span>
-                    </div>
-                    <div className="text-right" style={{ color: "var(--text-main)" }}>{p.qty < 1 ? p.qty.toFixed(6) : p.qty.toFixed(2)}</div>
-                    <div className="text-right" style={{ color: "var(--text-muted)" }}>{fmt(p.entry_price)}</div>
-                    <div className="text-right text-white">{fmt(p.current_price)}</div>
-                    <div className="text-right" style={{ color: "var(--accent-red)" }}>{p.stop_loss ? fmt(p.stop_loss) : "—"}</div>
-                    <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp1 ? fmt(p.tp1) : "—"}</div>
-                    <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp2 ? fmt(p.tp2) : "—"}</div>
-                    <div className="text-right font-semibold" style={{ color: p.unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                      {p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}
-                    </div>
-                  </div>
-                ))
-              )}
-
-              {/* Blotter total row */}
-              {positions.length > 0 && (
-                <div
-                  className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-t"
-                  style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
-                >
-                  <div className="text-[9px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total</div>
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div className="text-right font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                    {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
+                        {s === "pnl" ? "P&L" : s === "pct" ? "%" : "A-Z"}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* BOTTOM PANEL — tabbed: Feed | Pipeline | Scanner */}
-          <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
-            {/* Tab bar */}
-            <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-              {([
-                { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
-                { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
-                { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
-                { key: "diagnostics" as const, label: "Diagnostics" },
-              ]).map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setBottomTab(tab.key)}
-                  className="flex items-center gap-1.5 px-3 h-7 text-[9px] uppercase tracking-widest font-semibold border-b-2"
-                  style={{
-                    borderColor: bottomTab === tab.key ? "var(--accent-green)" : "transparent",
-                    color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
-                    background: "transparent",
-                  }}
-                >
-                  {tab.label}
-                  {tab.badge && (
-                    <span className="text-[8px] px-1 py-px rounded" style={{
-                      background: bottomTab === tab.key ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
-                      color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
-                    }}>
-                      {tab.badge}
-                    </span>
+                <div className="shrink-0 grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1 text-[9px] uppercase tracking-wider border-b"
+                  style={{ borderColor: "var(--border-color)", color: "var(--text-muted)", background: "var(--bg-main)" }}>
+                  <div>Symbol</div>
+                  <div>Side</div>
+                  <div className="text-right">Qty</div>
+                  <div className="text-right">Entry</div>
+                  <div className="text-right">Last</div>
+                  <div className="text-right">SL</div>
+                  <div className="text-right">TP1</div>
+                  <div className="text-right">TP2</div>
+                  <div className="text-right">P&L</div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                  {sortedPositions.length === 0 ? (
+                    <div className="px-3 py-6 text-center" style={{ color: "var(--text-muted)" }}>
+                      No open positions
+                    </div>
+                  ) : (
+                    sortedPositions.map((p) => (
+                      <div
+                        key={p.symbol}
+                        className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-b items-center"
+                        style={{ borderColor: "rgba(255,255,255,0.03)" }}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-white font-semibold truncate">{p.symbol}</span>
+                          {p.pattern && <span className="text-[9px] truncate" style={{ color: "var(--accent-amber)" }}>{p.pattern}</span>}
+                        </div>
+                        <div>
+                          <span
+                            className="text-[9px] px-1 py-px rounded uppercase font-semibold"
+                            style={{
+                              background: p.side === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                              color: p.side === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                            }}
+                          >
+                            {p.side}
+                          </span>
+                        </div>
+                        <div className="text-right" style={{ color: "var(--text-main)" }}>{p.qty < 1 ? p.qty.toFixed(6) : p.qty.toFixed(2)}</div>
+                        <div className="text-right" style={{ color: "var(--text-muted)" }}>{fmt(p.entry_price)}</div>
+                        <div className="text-right text-white">{fmt(p.current_price)}</div>
+                        <div className="text-right" style={{ color: "var(--accent-red)" }}>{p.stop_loss ? fmt(p.stop_loss) : "—"}</div>
+                        <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp1 ? fmt(p.tp1) : "—"}</div>
+                        <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp2 ? fmt(p.tp2) : "—"}</div>
+                        <div className="text-right font-semibold" style={{ color: p.unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                          {p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}
+                        </div>
+                      </div>
+                    ))
                   )}
-                </button>
-              ))}
-            </div>
 
-            {/* Tab content */}
-            <div className="flex-1 overflow-y-auto">
-              {bottomTab === "feed" && (
-                <div className="px-3 py-1">
-                  {feed.map((e, i) => (
-                    <div key={i} className="flex items-start gap-2 py-0.5 leading-tight">
-                      <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
-                        {ts(e.time)}
+                  {positions.length > 0 && (
+                    <div
+                      className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-t"
+                      style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
+                    >
+                      <div className="text-[9px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total</div>
+                      <div /><div /><div /><div /><div /><div /><div />
+                      <div className="text-right font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                        {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT SIDEBAR — risk, stats, alerts */}
+              <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
+                  <Row label="Equity" value={fmt(equity)} />
+                  <Row label="Buying Power" value={fmt(bp)} />
+                  <Row label="Cash" value={fmt(account?.cash ?? bp)} />
+                  <div className="mt-2">
+                    <div className="flex justify-between text-[10px] mb-0.5">
+                      <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
+                      <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
+                        {lockedPct.toFixed(0)}%
                       </span>
-                      <span
-                        className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
+                    </div>
+                    <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
+                      <div
+                        className="h-full rounded-full transition-all"
                         style={{
-                          background: e.tag === "FILL" ? "var(--accent-green-dim)"
-                            : e.tag === "REJECT" ? "var(--accent-red-dim)"
-                            : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
-                            : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
-                            : "rgba(205,166,97,0.15)",
-                          color: e.tag === "FILL" ? "var(--accent-green)"
-                            : e.tag === "REJECT" ? "var(--accent-red)"
-                            : e.tag === "NEAR" ? "var(--accent-amber)"
-                            : e.tag === "CLOSED" ? "var(--text-muted)"
-                            : "var(--accent-amber)",
+                          width: `${Math.min(lockedPct, 100)}%`,
+                          background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
                         }}
-                      >
-                        {e.tag}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
+                  <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
+                  <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
+                  <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
+                  <Row label="Trades" value={String(history.length)} />
+                  <Row label="Signals" value={String(signals.length)} />
+                  <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
+                </div>
+
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                    Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 5).length})
+                  </div>
+                  {approaching.filter((s) => (s.distancePct ?? 0) <= 5).slice(0, 8).map((s) => {
+                    const dist = s.distancePct ?? 0;
+                    return (
+                      <div key={s.id} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
+                            style={{
+                              background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                              color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                            }}
+                          >
+                            {s.direction === "long" ? "L" : "S"}
+                          </span>
+                          <span className="text-white truncate">{s.symbol}</span>
+                          {s.paperOnly && (
+                            <span className="text-[8px] px-1 py-px rounded shrink-0" style={{
+                              background: "rgba(205,166,97,0.15)",
+                              color: "var(--accent-amber)",
+                            }}>
+                              paper
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className="text-[9px] shrink-0 font-semibold"
+                          style={{ color: dist < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
+                        >
+                          {dist.toFixed(1)}%
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {approaching.filter((s) => (s.distancePct ?? 0) <= 5).length === 0 && (
+                    <div style={{ color: "var(--text-muted)" }}>None imminent</div>
+                  )}
+                </div>
+
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Alerts</div>
+                  {alerts.map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 py-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{
+                        background: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)",
+                      }} />
+                      <span style={{ color: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }}>
+                        {a.text}
                       </span>
-                      <span style={{ color: e.color }}>{e.text}</span>
                     </div>
                   ))}
-                  {feed.length === 0 && (
-                    <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
+                </div>
+
+                <div className="px-3 py-3 flex-1">
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                    Recent Fills ({history.length})
+                  </div>
+                  {history.slice(0, 10).map((t, i) => (
+                    <div key={i} className="flex items-center justify-between py-0.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
+                          style={{
+                            background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                            color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                          }}
+                        >
+                          {t.direction === "long" ? "L" : "S"}
+                        </span>
+                        <span className="text-white truncate">{t.symbol}</span>
+                        <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{t.pattern}</span>
+                      </div>
+                      <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>
+                        {dateShort(t.filled_at)}
+                      </span>
+                    </div>
+                  ))}
+                  {history.length === 0 && (
+                    <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
                   )}
                 </div>
-              )}
+              </aside>
+            </>
+          )}
 
-              {bottomTab === "pipeline" && (
-                <ScanPipeline data={pipeline} />
-              )}
-
-              {bottomTab === "scanner" && (
-                <ScanStateView data={scanState} />
-              )}
-
-              {bottomTab === "diagnostics" && (
-                <DiagnosticsView />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT SIDEBAR (30%) — risk, stats, alerts */}
-        <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
-
-          {/* RISK */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
-            <Row label="Equity" value={fmt(equity)} />
-            <Row label="Buying Power" value={fmt(bp)} />
-            <Row label="Cash" value={fmt(account?.cash ?? bp)} />
-            <div className="mt-2">
-              <div className="flex justify-between text-[10px] mb-0.5">
-                <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
-                <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                  {lockedPct.toFixed(0)}%
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min(lockedPct, 100)}%`,
-                    background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* STATS */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
-            <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
-            <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
-            <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
-            <Row label="Trades" value={String(history.length)} />
-            <Row label="Signals" value={String(signals.length)} />
-            <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
-          </div>
-
-          {/* APPROACHING (imminent only) */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-              Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 5).length})
-            </div>
-            {approaching.filter((s) => (s.distancePct ?? 0) <= 5).slice(0, 8).map((s) => {
-              const dist = s.distancePct ?? 0;
-              return (
-                <div key={s.id} className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
+          {/* ============ FEED PAGE ============ */}
+          {activePage === "feed" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-4 py-3">
+                <div className="text-[9px] uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--accent-green)" }}>
+                  Live Event Feed ({feed.length})
+                </div>
+                {feed.map((e, i) => (
+                  <div key={i} className="flex items-start gap-2 py-1 leading-tight">
+                    <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                      {ts(e.time)}
+                    </span>
                     <span
-                      className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
+                      className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
                       style={{
-                        background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                        color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                        background: e.tag === "FILL" ? "var(--accent-green-dim)"
+                          : e.tag === "REJECT" ? "var(--accent-red-dim)"
+                          : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
+                          : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
+                          : "rgba(205,166,97,0.15)",
+                        color: e.tag === "FILL" ? "var(--accent-green)"
+                          : e.tag === "REJECT" ? "var(--accent-red)"
+                          : e.tag === "NEAR" ? "var(--accent-amber)"
+                          : e.tag === "CLOSED" ? "var(--text-muted)"
+                          : "var(--accent-amber)",
                       }}
                     >
-                      {s.direction === "long" ? "L" : "S"}
+                      {e.tag}
                     </span>
-                    <span className="text-white truncate">{s.symbol}</span>
-                    {s.paperOnly && (
-                      <span className="text-[8px] px-1 py-px rounded shrink-0" style={{
-                        background: "rgba(205,166,97,0.15)",
-                        color: "var(--accent-amber)",
-                      }}>
-                        paper
-                      </span>
-                    )}
+                    <span style={{ color: e.color }}>{e.text}</span>
                   </div>
-                  <span
-                    className="text-[9px] shrink-0 font-semibold"
-                    style={{ color: dist < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
-                  >
-                    {dist.toFixed(1)}%
-                  </span>
-                </div>
-              );
-            })}
-            {approaching.filter((s) => (s.distancePct ?? 0) <= 5).length === 0 && (
-              <div style={{ color: "var(--text-muted)" }}>None imminent</div>
-            )}
-          </div>
-
-          {/* ALERTS */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Alerts</div>
-            {alerts.map((a, i) => (
-              <div key={i} className="flex items-center gap-2 py-0.5">
-                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{
-                  background: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)",
-                }} />
-                <span style={{ color: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                  {a.text}
-                </span>
+                ))}
+                {feed.length === 0 && (
+                  <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
+                )}
               </div>
-            ))}
-          </div>
-
-          {/* RECENT FILLS */}
-          <div className="px-3 py-3 flex-1">
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-              Recent Fills ({history.length})
             </div>
-            {history.slice(0, 10).map((t, i) => (
-              <div key={i} className="flex items-center justify-between py-0.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
-                    style={{
-                      background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                      color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
-                    }}
-                  >
-                    {t.direction === "long" ? "L" : "S"}
-                  </span>
-                  <span className="text-white truncate">{t.symbol}</span>
-                  <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{t.pattern}</span>
-                </div>
-                <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>
-                  {dateShort(t.filled_at)}
-                </span>
-              </div>
-            ))}
-            {history.length === 0 && (
-              <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
-            )}
-          </div>
-        </aside>
+          )}
+
+          {/* ============ PIPELINE PAGE ============ */}
+          {activePage === "pipeline" && (
+            <div className="flex-1 overflow-y-auto">
+              <ScanPipeline data={pipeline} />
+            </div>
+          )}
+
+          {/* ============ SCANNER PAGE ============ */}
+          {activePage === "scanner" && (
+            <div className="flex-1 overflow-y-auto">
+              <ScanStateView data={scanState} />
+            </div>
+          )}
+
+          {/* ============ DIAGNOSTICS PAGE ============ */}
+          {activePage === "diagnostics" && (
+            <div className="flex-1 overflow-y-auto">
+              <DiagnosticsView />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
