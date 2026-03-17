@@ -115,22 +115,50 @@ async function fetchAlpacaAssets(): Promise<{ equities: AlpacaAsset[]; crypto: A
 // ============================================================
 const MAJOR_EXCHANGES = new Set(["NYSE", "NASDAQ", "AMEX", "ARCA", "BATS"]);
 
-// Name-based filter: Alpaca marks warrants, units, and rights in the asset name
-const JUNK_NAME_RE = /\bwarrant|warrant\b|\bunit\b|\bright\b/i;
+// Name-based patterns to exclude non-common-stock instruments.
+// Alpaca's asset name field reliably contains these keywords for special instruments.
+const EXCLUDED_NAME_PATTERNS = [
+  /warrant/i,
+  /\bunit\b/i,
+  /\bright\b/i,
+  /\bnote\b/i,
+  /\bdebenture\b/i,
+  /preferred/i,
+];
 
 function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): FilteredAsset[] {
   const results: FilteredAsset[] = [];
 
+  let filteredByStatus = 0;
+  let filteredByExchange = 0;
+  let filteredBySymbolFormat = 0;
+  let filteredByName = 0;
+
   // Equity filters
   for (const asset of raw.equities) {
-    if (!asset.tradable) continue;
-    if (asset.status !== "active") continue;
-    if (!MAJOR_EXCHANGES.has(asset.exchange)) continue;
-    if (asset.symbol.includes(".") || asset.symbol.includes("/")) continue;
-    if (asset.symbol.length > 5) continue;
-    // Filter out warrants, units, rights (detected by name, not symbol suffix —
-    // suffix-based filtering would kill legitimate tickers like SNOW, UBER)
-    if (JUNK_NAME_RE.test(asset.name)) continue;
+    if (!asset.tradable || asset.status !== "active") {
+      filteredByStatus++;
+      continue;
+    }
+    if (!MAJOR_EXCHANGES.has(asset.exchange)) {
+      filteredByExchange++;
+      continue;
+    }
+    if (
+      asset.symbol.includes(".") ||
+      asset.symbol.includes("/") ||
+      asset.symbol.includes("-") ||
+      asset.symbol.length > 5
+    ) {
+      filteredBySymbolFormat++;
+      continue;
+    }
+    // Filter out warrants, units, rights, notes, debentures, preferred shares
+    // by checking the asset name from Alpaca (more reliable than ticker suffix)
+    if (EXCLUDED_NAME_PATTERNS.some((re) => re.test(asset.name))) {
+      filteredByName++;
+      continue;
+    }
 
     results.push({
       symbol: asset.symbol,
@@ -157,7 +185,11 @@ function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): 
   }
 
   const cryptoCount = results.length - equityCount;
-  console.log(`[Universe] After filtering: ${equityCount} equities (major exchange, no OTC), ${cryptoCount} crypto`);
+  console.log(
+    `[Universe] Filtered: ${filteredByStatus} by status, ${filteredByExchange} by exchange, ` +
+    `${filteredBySymbolFormat} by symbol format, ${filteredByName} by name (warrants/units/rights/preferred)`,
+  );
+  console.log(`[Universe] Final: ${equityCount} equities, ${cryptoCount} crypto`);
 
   return results;
 }
