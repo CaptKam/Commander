@@ -134,7 +134,7 @@ export const symbolScanState = pgTable("symbol_scan_state", {
   pivotCount: integer("pivot_count").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
-  uniqueIndex("symbol_scan_state_symbol_timeframe_idx").on(table.symbol, table.timeframe),
+  uniqueIndex("idx_scan_state_symbol_tf").on(table.symbol, table.timeframe),
 ]);
 
 export type SymbolScanState = typeof symbolScanState.$inferSelect;

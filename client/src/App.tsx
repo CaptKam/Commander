@@ -84,6 +84,10 @@ interface ApproachingSignal {
   c: number | null;
   distancePct: number;
   createdAt: string;
+  hasOrder?: boolean;
+  blocked?: string | null;
+  paperOnly?: boolean;
+  rr?: number | null;
 }
 
 interface BotSettings {
@@ -282,15 +286,14 @@ export default function App() {
     });
 
     approaching.forEach((s) => {
-      const isCrypto = s.symbol.includes("/");
-      const blocked = isCrypto && s.direction === "short";
+      const dist = s.distancePct ?? 0;
+      const label = `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.pattern} ${s.timeframe} — ${dist.toFixed(1)}% from D @ ${fmt(s.projectedD)}`;
+      const suffix = s.paperOnly ? " (paper)" : "";
       events.push({
         time: s.createdAt,
-        tag: blocked ? "REJECT" : "NEAR",
-        color: blocked ? "var(--accent-red)" : s.distancePct < 2 ? "var(--accent-amber)" : "var(--text-main)",
-        text: blocked
-          ? `${s.symbol} ${s.pattern} SHORT blocked — crypto shorts unsupported`
-          : `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.pattern} ${s.timeframe} — ${(s.distancePct ?? 0).toFixed(1)}% from D @ ${fmt(s.projectedD)}`,
+        tag: "NEAR",
+        color: dist < 2 ? "var(--accent-amber)" : "var(--text-main)",
+        text: label + suffix,
       });
     });
 
@@ -635,17 +638,16 @@ export default function App() {
             <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
             <Row label="Trades" value={String(history.length)} />
             <Row label="Signals" value={String(signals.length)} />
-            <Row label="Approaching" value={String(approaching.filter((s) => s.distancePct <= 5).length)} color="var(--accent-amber)" />
+            <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
           </div>
 
           {/* APPROACHING (imminent only) */}
           <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
             <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-              Imminent ({approaching.filter((s) => s.distancePct <= 5).length})
+              Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 5).length})
             </div>
-            {approaching.filter((s) => s.distancePct <= 5).slice(0, 8).map((s) => {
-              const isCrypto = s.symbol.includes("/");
-              const blocked = isCrypto && s.direction === "short";
+            {approaching.filter((s) => (s.distancePct ?? 0) <= 5).slice(0, 8).map((s) => {
+              const dist = s.distancePct ?? 0;
               return (
                 <div key={s.id} className="flex items-center justify-between py-1">
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -659,21 +661,25 @@ export default function App() {
                       {s.direction === "long" ? "L" : "S"}
                     </span>
                     <span className="text-white truncate">{s.symbol}</span>
+                    {s.paperOnly && (
+                      <span className="text-[8px] px-1 py-px rounded shrink-0" style={{
+                        background: "rgba(205,166,97,0.15)",
+                        color: "var(--accent-amber)",
+                      }}>
+                        paper
+                      </span>
+                    )}
                   </div>
-                  {blocked ? (
-                    <span className="text-[9px] shrink-0" style={{ color: "var(--accent-red)" }}>BLOCKED</span>
-                  ) : (
-                    <span
-                      className="text-[9px] shrink-0 font-semibold"
-                      style={{ color: s.distancePct < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
-                    >
-                      {s.distancePct.toFixed(1)}%
-                    </span>
-                  )}
+                  <span
+                    className="text-[9px] shrink-0 font-semibold"
+                    style={{ color: dist < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
+                  >
+                    {dist.toFixed(1)}%
+                  </span>
                 </div>
               );
             })}
-            {approaching.filter((s) => s.distancePct <= 5).length === 0 && (
+            {approaching.filter((s) => (s.distancePct ?? 0) <= 5).length === 0 && (
               <div style={{ color: "var(--text-muted)" }}>None imminent</div>
             )}
           </div>

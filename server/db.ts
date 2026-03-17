@@ -181,8 +181,8 @@ export async function ensureTablesExist(): Promise<void> {
     `);
     // Ensure unique constraint exists for existing deployments where CREATE TABLE was a no-op
     await db.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS symbol_scan_state_symbol_timeframe_idx
-      ON symbol_scan_state(symbol, timeframe)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_state_symbol_tf
+      ON symbol_scan_state (symbol, timeframe)
     `);
     console.log("[DB] Table symbol_scan_state: OK");
   } catch (err) {
