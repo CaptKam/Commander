@@ -9,7 +9,7 @@
  */
 
 import { sendSystemBoot, sendError, sendPhaseCSignal } from "./utils/notifier";
-import { fetchWatchlist } from "./alpaca-data";
+import { fetchWatchlist, getLatestCachedPrice } from "./alpaca-data";
 import { detectHarmonics, detectCompletedPatterns, detectPatternPhase } from "./patterns";
 import { processPhaseCSignals } from "./screener";
 import type { PhaseCSignal } from "./screener";
@@ -212,14 +212,24 @@ const PROXIMITY_THRESHOLD_PCT = 0.05; // 5% from entry price
  * an order until BTC is within $69,300 (for long) or $62,700 (for short).
  */
 function isWithinProximity(signal: PhaseCSignal): boolean {
-  const currentPrice = getStreamPrice(signal.symbol);
+  // Try WebSocket price first, then candle cache
+  let currentPrice = getStreamPrice(signal.symbol);
+
+  // Fallback: try candle cache if WebSocket has nothing
+  if (currentPrice === null || currentPrice <= 0) {
+    const cachedPrice = getLatestCachedPrice(signal.symbol);
+    if (cachedPrice !== null && cachedPrice > 0) {
+      currentPrice = cachedPrice;
+    }
+  }
 
   if (currentPrice === null || currentPrice <= 0) {
-    // No price data available — conservative: allow the order
+    // No price data AT ALL — do NOT place an order blind.
+    // Save as projected, will check again when we have price data.
     console.log(
-      `[Orchestrator] No current price for ${signal.symbol} — allowing order placement (conservative)`,
+      `[Orchestrator] No current price for ${signal.symbol} — saving as projected (NOT placing order)`,
     );
-    return true;
+    return false;
   }
 
   const entryPrice = signal.limitPrice;
