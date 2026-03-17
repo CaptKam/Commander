@@ -2160,6 +2160,11 @@ function TradePage({
   const [signal, setSignal] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [orderResult, setOrderResult] = useState<string | null>(null);
+  const [patternPhase, setPatternPhase] = useState<{
+    matched: number; total: number; currentPrice: number;
+    dPrice: number; dFound: boolean; distToDPct: number;
+    leg: string; status: string;
+  } | null>(null);
 
   // Fetch candle data when symbol or timeframe changes
   useEffect(() => {
@@ -2180,6 +2185,7 @@ function TradePage({
   useEffect(() => {
     if (!signalId) {
       setSignal(null);
+      setPatternPhase(null);
       return;
     }
     fetch(`/api/signal/${signalId}`)
@@ -2264,13 +2270,14 @@ function TradePage({
 
       candleSeries.setData(candles);
 
-      // Add overlay lines if we have signal data
+      // Add overlay lines and XABCD pattern shape if we have signal data
       if (signal) {
         const entryPrice = Number(signal.entryPrice);
         const slPrice = Number(signal.stopLossPrice);
         const tp1Price = Number(signal.tp1Price);
         const tp2Price = Number(signal.tp2Price);
 
+        // Draw SL/TP/Entry horizontal price lines
         if (entryPrice > 0) {
           candleSeries.createPriceLine({
             price: entryPrice,
@@ -2312,25 +2319,121 @@ function TradePage({
           });
         }
 
-        // XABCD pattern points as purple dotted lines
-        const points = [
-          { label: "X", price: Number(signal.xPrice) },
-          { label: "A", price: Number(signal.aPrice) },
-          { label: "B", price: Number(signal.bPrice) },
-          { label: "C", price: Number(signal.cPrice) },
-        ];
-        for (const pt of points) {
-          if (pt.price > 0) {
-            candleSeries.createPriceLine({
-              price: pt.price,
-              color: "#8b5cf6",
-              lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
-              axisLabelVisible: true,
-              title: pt.label,
+        // ── XABCD Pattern Shape Overlay ──
+        // Match XABCD pivot prices to actual candle timestamps
+        const xP = Number(signal.xPrice);
+        const aP = Number(signal.aPrice);
+        const bP = Number(signal.bPrice);
+        const cP = Number(signal.cPrice);
+        const dP = entryPrice;
+        const dir = signal.direction; // "long" or "short"
+
+        // For long: X=low, A=high, B=low, C=high, D=low
+        // For short: X=high, A=low, B=high, C=low, D=high
+        const pivotSide = dir === "long"
+          ? ["low", "high", "low", "high", "low"] as const
+          : ["high", "low", "high", "low", "high"] as const;
+        const pivotPrices = [xP, aP, bP, cP, dP];
+        const pivotLabels = ["X", "A", "B", "C", "D"];
+
+        // Find candle index for each pivot price, enforcing chronological order
+        function findPivotIndex(price: number, side: "high" | "low", startIdx: number): number {
+          if (price <= 0 || isNaN(price)) return -1;
+          let bestIdx = -1;
+          let bestDiff = Infinity;
+          for (let i = startIdx; i < candles.length; i++) {
+            const cp = side === "high" ? candles[i].high : candles[i].low;
+            const diff = Math.abs(cp - price);
+            const pctDiff = diff / price;
+            if (pctDiff < 0.008 && diff < bestDiff) { // within 0.8%
+              bestDiff = diff;
+              bestIdx = i;
+            }
+          }
+          return bestIdx;
+        }
+
+        const pivotIndices: number[] = [];
+        let searchFrom = 0;
+        for (let i = 0; i < 4; i++) { // X, A, B, C (not D yet)
+          const idx = findPivotIndex(pivotPrices[i], pivotSide[i], searchFrom);
+          pivotIndices.push(idx);
+          if (idx >= 0) searchFrom = idx + 1;
+        }
+
+        // D might be projected (not yet on chart) or completed
+        const dIdx = findPivotIndex(dP, pivotSide[4], searchFrom);
+        pivotIndices.push(dIdx);
+
+        // Build the pattern line data points
+        const patternLineData: { time: any; value: number }[] = [];
+        const markers: any[] = [];
+        const markerColors = ["#c084fc", "#c084fc", "#c084fc", "#c084fc", "#eab308"]; // purple for XABC, yellow for D
+        const markerShapes = dir === "long"
+          ? ["arrowUp", "arrowDown", "arrowUp", "arrowDown", "arrowUp"] // low=up, high=down
+          : ["arrowDown", "arrowUp", "arrowDown", "arrowUp", "arrowDown"];
+
+        for (let i = 0; i < 5; i++) {
+          const idx = pivotIndices[i];
+          const price = pivotPrices[i];
+          if (idx >= 0 && price > 0) {
+            patternLineData.push({ time: candles[idx].time, value: price });
+            markers.push({
+              time: candles[idx].time,
+              position: pivotSide[i] === "high" ? "aboveBar" : "belowBar",
+              color: markerColors[i],
+              shape: markerShapes[i],
+              text: pivotLabels[i] + " " + price.toFixed(price > 100 ? 2 : price > 1 ? 4 : 6),
+            });
+          } else if (i === 4 && price > 0 && candles.length > 0) {
+            // D is projected — extend to the last candle's time
+            const lastTime = candles[candles.length - 1].time;
+            patternLineData.push({ time: lastTime, value: price });
+            markers.push({
+              time: lastTime,
+              position: pivotSide[i] === "high" ? "aboveBar" : "belowBar",
+              color: "#eab308",
+              shape: "circle",
+              text: "D (proj) " + price.toFixed(price > 100 ? 2 : price > 1 ? 4 : 6),
             });
           }
         }
+
+        // Draw the XABCD line series if we found at least 3 points
+        if (patternLineData.length >= 3) {
+          const patternSeries = chart.addLineSeries({
+            color: "#a78bfa",
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            crosshairMarkerVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          });
+          patternSeries.setData(patternLineData);
+        }
+
+        // Add markers for XABCD pivot points
+        if (markers.length > 0) {
+          markers.sort((a: any, b: any) => a.time - b.time);
+          candleSeries.setMarkers(markers);
+        }
+
+        // ── "Where are we" indicator — draw a vertical region or highlight ──
+        // Find the current leg based on which points we matched
+        const matched = pivotIndices.filter((idx) => idx >= 0).length;
+        const lastCandlePrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
+
+        // Store phase info for the pattern progress bar UI
+        setPatternPhase({
+          matched,
+          total: 5,
+          currentPrice: lastCandlePrice,
+          dPrice: dP,
+          dFound: pivotIndices[4] >= 0,
+          distToDPct: dP > 0 ? Math.abs((lastCandlePrice - dP) / dP * 100) : 0,
+          leg: matched <= 2 ? "XA→AB" : matched <= 3 ? "AB→BC" : matched <= 4 ? "BC→CD" : "D Complete",
+          status: signal.status,
+        });
       }
 
       chart.timeScale().fitContent();
@@ -2483,6 +2586,89 @@ function TradePage({
             </div>
           )}
         </div>
+
+        {/* Pattern Phase Indicator Bar */}
+        {patternPhase && signal && (
+          <div
+            className="shrink-0 flex items-center gap-3 px-4 h-9 border-t"
+            style={{ borderColor: "var(--border-color)", background: "#0d120d" }}
+          >
+            {/* Step tracker: X → A → B → C → D */}
+            <div className="flex items-center gap-0.5">
+              {["X", "A", "B", "C", "D"].map((label, i) => {
+                const isMatched = i < patternPhase.matched;
+                const isCurrent = i === patternPhase.matched - 1 || (i === patternPhase.matched && i < 5);
+                const isD = label === "D";
+                return (
+                  <div key={label} className="flex items-center">
+                    {i > 0 && (
+                      <div
+                        className="w-5 h-0.5 mx-0.5"
+                        style={{
+                          background: isMatched ? "#a78bfa" : "#1a2e1a",
+                        }}
+                      />
+                    )}
+                    <div
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold"
+                      style={{
+                        background: isMatched
+                          ? isD ? "rgba(234,179,8,0.3)" : "rgba(167,139,250,0.25)"
+                          : isCurrent ? "rgba(167,139,250,0.1)" : "#111",
+                        color: isMatched
+                          ? isD ? "#eab308" : "#c084fc"
+                          : isCurrent ? "#8b5cf6" : "#333",
+                        border: `1.5px solid ${isMatched ? (isD ? "#eab308" : "#8b5cf6") : isCurrent ? "#6d28d9" : "#222"}`,
+                        boxShadow: isCurrent && !isMatched ? "0 0 6px rgba(139,92,246,0.3)" : "none",
+                      }}
+                    >
+                      {label}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Current leg label */}
+            <div className="text-[10px] font-semibold" style={{ color: "#a78bfa" }}>
+              {patternPhase.leg}
+            </div>
+
+            {/* Distance to D */}
+            {!patternPhase.dFound && patternPhase.dPrice > 0 && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                  Price → D:
+                </span>
+                <span
+                  className="text-[10px] font-bold"
+                  style={{
+                    color: patternPhase.distToDPct < 2 ? "#ef4444"
+                      : patternPhase.distToDPct < 5 ? "#eab308"
+                      : "#a78bfa",
+                  }}
+                >
+                  {patternPhase.distToDPct.toFixed(2)}%
+                </span>
+                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                  (${patternPhase.currentPrice > 100
+                    ? patternPhase.currentPrice.toFixed(2)
+                    : patternPhase.currentPrice.toFixed(4)} → ${patternPhase.dPrice > 100
+                    ? patternPhase.dPrice.toFixed(2)
+                    : patternPhase.dPrice.toFixed(4)})
+                </span>
+              </div>
+            )}
+            {patternPhase.dFound && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
+                  style={{ background: "rgba(234,179,8,0.15)", color: "#eab308" }}>
+                  D Reached
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* TRADE PANEL — 320px right side */}
