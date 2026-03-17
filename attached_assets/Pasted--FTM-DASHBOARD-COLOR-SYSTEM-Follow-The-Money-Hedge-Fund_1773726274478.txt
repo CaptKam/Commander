@@ -1,0 +1,245 @@
+# FTM DASHBOARD COLOR SYSTEM
+# Follow The Money — Hedge Fund Terminal Aesthetic
+
+## SHARED BASE (all systems)
+
+```css
+/* Dark terminal background */
+--bg-primary: #0a0f1a;
+--bg-secondary: #0f1420;
+--bg-card: #111827;
+--bg-elevated: #1a2035;
+
+/* Borders */
+--border-default: rgba(255, 255, 255, 0.06);
+--border-hover: rgba(255, 255, 255, 0.12);
+--border-active: rgba(255, 255, 255, 0.20);
+
+/* Text */
+--text-primary: #e2e8f0;
+--text-secondary: #94a3b8;
+--text-muted: #64748b;
+--text-dim: #475569;
+
+/* Semantic */
+--positive: #10b981;     /* green — profit, up */
+--positive-dim: #065f46;
+--negative: #ef4444;     /* red — loss, down */
+--negative-dim: #7f1d1d;
+--warning: #f59e0b;      /* amber — caution */
+--neutral: #6b7280;      /* gray — hold, inactive */
+
+/* Typography */
+--font-display: 'Inter', 'SF Pro Display', system-ui, sans-serif;
+--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+
+/* Metrics font size */
+--metric-large: 28px;
+--metric-medium: 18px;
+--metric-small: 13px;
+--label: 11px;
+```
+
+## SYSTEM ACCENT COLORS
+
+### POTUS — Red (Political Power)
+```css
+--potus-primary: #ef4444;
+--potus-light: #f87171;
+--potus-lighter: #fca5a5;
+--potus-dark: #dc2626;
+--potus-bg: rgba(239, 68, 68, 0.08);
+--potus-border: rgba(239, 68, 68, 0.20);
+--potus-glow: 0 0 20px rgba(239, 68, 68, 0.15);
+```
+
+### ATLAS — Emerald (Technical Analysis)
+```css
+--atlas-primary: #10b981;
+--atlas-light: #34d399;
+--atlas-lighter: #6ee7b7;
+--atlas-dark: #059669;
+--atlas-bg: rgba(16, 185, 129, 0.08);
+--atlas-border: rgba(16, 185, 129, 0.20);
+--atlas-glow: 0 0 20px rgba(16, 185, 129, 0.15);
+```
+
+### ORACLE — Amber (Computation)
+```css
+--oracle-primary: #f59e0b;
+--oracle-light: #fbbf24;
+--oracle-lighter: #fcd34d;
+--oracle-dark: #d97706;
+--oracle-bg: rgba(245, 158, 11, 0.08);
+--oracle-border: rgba(245, 158, 11, 0.20);
+--oracle-glow: 0 0 20px rgba(245, 158, 11, 0.15);
+```
+
+### JARVIS — Violet (Judgment)
+```css
+--jarvis-primary: #8b5cf6;
+--jarvis-light: #a78bfa;
+--jarvis-lighter: #c4b5fd;
+--jarvis-dark: #7c3aed;
+--jarvis-bg: rgba(139, 92, 246, 0.08);
+--jarvis-border: rgba(139, 92, 246, 0.20);
+--jarvis-glow: 0 0 20px rgba(139, 92, 246, 0.15);
+```
+
+### COMMANDER — Platinum (Final Authority)
+```css
+--commander-primary: #e2e8f0;
+--commander-light: #f1f5f9;
+--commander-lighter: #f8fafc;
+--commander-dark: #cbd5e1;
+--commander-bg: rgba(226, 232, 240, 0.06);
+--commander-border: rgba(226, 232, 240, 0.15);
+--commander-glow: 0 0 20px rgba(226, 232, 240, 0.10);
+```
+
+## USAGE PATTERNS
+
+### Accent bar (top of cards)
+```css
+.accent-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--system-primary), var(--system-light));
+}
+```
+
+### System header
+```css
+.system-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--system-light);
+}
+```
+
+### Metric value
+```css
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: var(--metric-large);
+  font-weight: 500;
+  color: var(--system-light);
+}
+```
+
+### Metric label
+```css
+.metric-label {
+  font-family: var(--font-display);
+  font-size: var(--label);
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+```
+
+### Card
+```css
+.card {
+  background: var(--bg-card);
+  border: 0.5px solid var(--border-default);
+  border-radius: 12px;
+  padding: 20px;
+}
+.card:hover {
+  border-color: var(--system-border);
+  box-shadow: var(--system-glow);
+}
+```
+
+### Status indicator
+```css
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--system-primary);
+  box-shadow: 0 0 6px var(--system-primary);
+}
+.status-dot.offline {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+```
+
+### P&L coloring
+```css
+.pnl-positive { color: #10b981; }
+.pnl-negative { color: #ef4444; }
+.pnl-neutral { color: #6b7280; }
+```
+
+### Chart colors
+```css
+/* Use system accent as primary line color */
+/* Use --text-muted for grid lines */
+/* Use --bg-secondary for chart background */
+/* Use --positive/#10b981 for up candles */
+/* Use --negative/#ef4444 for down candles */
+```
+
+## COMPONENT EXAMPLES
+
+### Navigation bar (shared across all systems)
+```
+┌──────────────────────────────────────────────────────┐
+│  FTM  │ POTUS │ ATLAS │ ORACLE │ JARVIS │ COMMANDER │
+│       │  ●    │  ●    │   ●    │   ●    │    ○      │
+└──────────────────────────────────────────────────────┘
+  Active system tab uses its accent color underline
+  ● = online (system accent color)
+  ○ = offline (gray)
+```
+
+### System status bar
+```
+┌─────────────────────────────────────────────────┐
+│ ● POTUS online  ● ATLAS online  ● ORACLE online│
+│ ● JARVIS online ○ COMMANDER offline             │
+│                                    Uptime: 99.2%│
+└─────────────────────────────────────────────────┘
+```
+
+## TAILWIND EQUIVALENTS
+
+| Token | Tailwind |
+|-------|----------|
+| --bg-primary | bg-slate-950 |
+| --bg-card | bg-gray-900 |
+| --text-primary | text-slate-200 |
+| --text-secondary | text-slate-400 |
+| --text-muted | text-slate-500 |
+| --potus-primary | text-red-500 |
+| --potus-light | text-red-400 |
+| --atlas-primary | text-emerald-500 |
+| --atlas-light | text-emerald-400 |
+| --oracle-primary | text-amber-500 |
+| --oracle-light | text-amber-400 |
+| --jarvis-primary | text-violet-500 |
+| --jarvis-light | text-violet-400 |
+| --commander-primary | text-slate-200 |
+| --commander-light | text-slate-100 |
+| --positive | text-emerald-500 |
+| --negative | text-red-500 |
+
+## COLOR LOGIC
+
+| System | Color | Meaning |
+|--------|-------|---------|
+| POTUS | Red | Political power, urgency, government authority |
+| Atlas | Emerald | Technical precision, chart patterns, growth |
+| Oracle | Amber | Computation, mathematical signals, warnings |
+| Jarvis | Violet | Wisdom, senior judgment, analytical authority |
+| Commander | Platinum | Clean execution, final authority, cold precision |
+
+Red for POTUS because politics IS danger — every policy action moves markets.
+Platinum for Commander because execution should be emotionless — cold, clinical, precise.

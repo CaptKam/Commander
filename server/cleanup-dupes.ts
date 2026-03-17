@@ -1,0 +1,106 @@
+/**
+ * Cleanup: Cancel duplicate Alpaca orders + mark stale DB signals
+ * Run with: npx tsx server/cleanup-dupes.ts
+ */
+
+async function run() {
+  const apiKey = process.env.ALPACA_API_KEY!;
+  const apiSecret = process.env.ALPACA_API_SECRET!;
+  const baseUrl = (process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets").replace(/\/v2\/?$/, "");
+
+  console.log("=== CLEANUP: Duplicate Orders ===\n");
+
+  const res = await fetch(`${baseUrl}/v2/orders?status=open&limit=500`, {
+    headers: {
+      "APCA-API-KEY-ID": apiKey,
+      "APCA-API-SECRET-KEY": apiSecret,
+    },
+  });
+
+  if (!res.ok) {
+    console.error(`Failed to fetch orders: ${res.status}`);
+    return;
+  }
+
+  const orders = (await res.json()) as any[];
+  console.log(`Found ${orders.length} open orders:\n`);
+
+  const bySymbol = new Map<string, any[]>();
+  for (const o of orders) {
+    if (!bySymbol.has(o.symbol)) bySymbol.set(o.symbol, []);
+    bySymbol.get(o.symbol)!.push(o);
+  }
+
+  for (const [symbol, symbolOrders] of bySymbol) {
+    console.log(`${symbol}: ${symbolOrders.length} order(s)`);
+    for (const o of symbolOrders) {
+      const age = Math.round((Date.now() - new Date(o.created_at).getTime()) / (1000 * 60 * 60));
+      console.log(`  ${o.side} ${o.qty}@${o.limit_price} — ${o.status} (${age}h old) [${o.id}]`);
+    }
+  }
+
+  const dupeSymbols = [...bySymbol.entries()].filter(([, orders]) => orders.length > 1);
+  
+  if (dupeSymbols.length === 0) {
+    console.log("\n✅ No duplicate orders found.");
+  } else {
+    console.log(`\n⚠️  ${dupeSymbols.length} symbols have duplicate orders:`);
+    
+    let cancelCount = 0;
+    for (const [symbol, symbolOrders] of dupeSymbols) {
+      symbolOrders.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      const keep = symbolOrders[0];
+      const toCancel = symbolOrders.slice(1);
+      
+      console.log(`\n  ${symbol}: keeping newest (${keep.limit_price}), cancelling ${toCancel.length} older:`);
+      
+      for (const o of toCancel) {
+        try {
+          const cancelRes = await fetch(`${baseUrl}/v2/orders/${o.id}`, {
+            method: "DELETE",
+            headers: {
+              "APCA-API-KEY-ID": apiKey,
+              "APCA-API-SECRET-KEY": apiSecret,
+            },
+          });
+          
+          if (cancelRes.ok || cancelRes.status === 204) {
+            console.log(`    ✅ Cancelled: ${o.side} ${o.qty}@${o.limit_price} (${o.id})`);
+            cancelCount++;
+          } else {
+            const body = await cancelRes.text();
+            console.log(`    ❌ Failed to cancel ${o.id}: ${cancelRes.status} — ${body}`);
+          }
+        } catch (err: any) {
+          console.log(`    ❌ Error cancelling ${o.id}: ${err.message}`);
+        }
+        
+        await new Promise(r => setTimeout(r, 200));
+      }
+    }
+    
+    console.log(`\n✅ Cancelled ${cancelCount} duplicate orders.`);
+  }
+
+  console.log("\n--- Post-cleanup buying power ---");
+  await new Promise(r => setTimeout(r, 1000));
+  
+  const acctRes = await fetch(`${baseUrl}/v2/account`, {
+    headers: {
+      "APCA-API-KEY-ID": apiKey,
+      "APCA-API-SECRET-KEY": apiSecret,
+    },
+  });
+  
+  if (acctRes.ok) {
+    const acct = await acctRes.json() as any;
+    console.log(`  Equity: $${Number(acct.equity).toFixed(2)}`);
+    console.log(`  Buying Power: $${Number(acct.buying_power).toFixed(2)}`);
+    console.log(`  Non-Marginable BP: $${Number(acct.non_marginable_buying_power).toFixed(2)}`);
+  }
+
+  console.log("\n=== CLEANUP COMPLETE ===");
+}
+
+run().catch(console.error);

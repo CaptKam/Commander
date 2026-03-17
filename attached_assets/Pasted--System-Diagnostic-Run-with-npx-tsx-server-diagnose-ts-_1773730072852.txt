@@ -1,0 +1,205 @@
+/**
+ * System Diagnostic — Run with: npx tsx server/diagnose.ts
+ * Tests: Alpaca API, DB state, trading config, signal pipeline
+ */
+
+const { Pool } = require("pg");
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+async function run() {
+  console.log("=== PATTERN BOT DIAGNOSTIC ===\n");
+
+  // 1. Check Alpaca API keys
+  const apiKey = process.env.ALPACA_API_KEY;
+  const apiSecret = process.env.ALPACA_API_SECRET;
+  const baseUrl = (process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets").replace(/\/v2\/?$/, "");
+
+  console.log("[1] ALPACA CONFIG");
+  console.log(`  API Key: ${apiKey ? apiKey.slice(0, 6) + "..." : "❌ MISSING"}`);
+  console.log(`  Secret:  ${apiSecret ? apiSecret.slice(0, 6) + "..." : "❌ MISSING"}`);
+  console.log(`  Base URL: ${baseUrl}`);
+
+  // 2. Test Alpaca account endpoint
+  console.log("\n[2] ALPACA ACCOUNT TEST");
+  try {
+    const res = await fetch(`${baseUrl}/v2/account`, {
+      headers: {
+        "APCA-API-KEY-ID": apiKey!,
+        "APCA-API-SECRET-KEY": apiSecret!,
+      },
+    });
+    if (res.ok) {
+      const acct = await res.json() as any;
+      console.log(`  ✅ Account OK`);
+      console.log(`  Equity: $${Number(acct.equity).toFixed(2)}`);
+      console.log(`  Buying Power: $${Number(acct.buying_power).toFixed(2)}`);
+      console.log(`  Non-Marginable BP: $${Number(acct.non_marginable_buying_power).toFixed(2)}`);
+      console.log(`  Status: ${acct.status}`);
+      console.log(`  Trading Blocked: ${acct.trading_blocked}`);
+      console.log(`  Account Blocked: ${acct.account_blocked}`);
+      console.log(`  Crypto Status: ${acct.crypto_status || "not returned"}`);
+    } else {
+      const body = await res.text();
+      console.log(`  ❌ FAILED: ${res.status} — ${body}`);
+    }
+  } catch (err: any) {
+    console.log(`  ❌ NETWORK ERROR: ${err.message}`);
+  }
+
+  // 3. Test Alpaca open orders
+  console.log("\n[3] ALPACA OPEN ORDERS");
+  try {
+    const res = await fetch(`${baseUrl}/v2/orders?status=open&limit=10`, {
+      headers: {
+        "APCA-API-KEY-ID": apiKey!,
+        "APCA-API-SECRET-KEY": apiSecret!,
+      },
+    });
+    if (res.ok) {
+      const orders = await res.json() as any[];
+      console.log(`  ✅ ${orders.length} open orders`);
+      for (const o of orders.slice(0, 5)) {
+        console.log(`     ${o.symbol} ${o.side} ${o.qty}@${o.limit_price} (${o.time_in_force}) — ${o.status}`);
+      }
+      if (orders.length > 5) console.log(`     ... and ${orders.length - 5} more`);
+    } else {
+      const body = await res.text();
+      console.log(`  ❌ FAILED: ${res.status} — ${body}`);
+    }
+  } catch (err: any) {
+    console.log(`  ❌ NETWORK ERROR: ${err.message}`);
+  }
+
+  // 4. Check DB system_settings
+  console.log("\n[4] SYSTEM SETTINGS (DB)");
+  try {
+    const { rows } = await pool.query("SELECT * FROM system_settings LIMIT 1");
+    if (rows.length > 0) {
+      const s = rows[0];
+      console.log(`  Trading Enabled: ${s.trading_enabled ? "✅ YES" : "❌ NO — THIS IS WHY NO ORDERS"}`);
+      console.log(`  Equity Allocation: ${(s.equity_allocation * 100).toFixed(0)}%`);
+      console.log(`  Crypto Allocation: ${(s.crypto_allocation * 100).toFixed(0)}%`);
+      console.log(`  Min Profit: ${s.min_profit_pct}%`);
+      console.log(`  TP Ratio: ${s.tp_ratio}`);
+    } else {
+      console.log("  ⚠️ No settings row found — using defaults");
+    }
+  } catch (err: any) {
+    console.log(`  ❌ DB ERROR: ${err.message}`);
+  }
+
+  // 5. Signal status breakdown
+  console.log("\n[5] SIGNAL STATUS BREAKDOWN (DB)");
+  try {
+    const { rows } = await pool.query(`
+      SELECT status, COUNT(*) as count 
+      FROM live_signals 
+      GROUP BY status 
+      ORDER BY count DESC
+    `);
+    for (const r of rows) {
+      console.log(`  ${r.status}: ${r.count}`);
+    }
+  } catch (err: any) {
+    console.log(`  ❌ DB ERROR: ${err.message}`);
+  }
+
+  // 6. Signals with orders vs without
+  console.log("\n[6] PENDING SIGNALS — ORDER STATUS");
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        COUNT(*) FILTER (WHERE entry_order_id IS NOT NULL) as with_order,
+        COUNT(*) FILTER (WHERE entry_order_id IS NULL) as no_order,
+        COUNT(*) as total
+      FROM live_signals 
+      WHERE status = 'pending'
+    `);
+    const r = rows[0];
+    console.log(`  Total pending: ${r.total}`);
+    console.log(`  With order ID: ${r.with_order} ${r.with_order > 0 ? "✅" : "⚠️"}`);
+    console.log(`  No order ID:   ${r.no_order} ${r.no_order > 0 ? "← THESE NEVER GOT ORDERS" : "✅"}`);
+  } catch (err: any) {
+    console.log(`  ❌ DB ERROR: ${err.message}`);
+  }
+
+  // 7. Crypto vs equity pending breakdown
+  console.log("\n[7] PENDING BY ASSET TYPE");
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        symbol,
+        pattern_type,
+        timeframe,
+        direction,
+        entry_price,
+        score,
+        entry_order_id,
+        created_at
+      FROM live_signals 
+      WHERE status = 'pending' AND symbol LIKE '%/%'
+      ORDER BY created_at DESC
+      LIMIT 10
+    `);
+    console.log(`  CRYPTO PENDING (should have orders 24/7):`);
+    if (rows.length === 0) {
+      console.log("    None found");
+    } else {
+      for (const r of rows) {
+        const hasOrder = r.entry_order_id ? "✅ HAS ORDER" : "❌ NO ORDER";
+        console.log(`    ${r.symbol} ${r.pattern_type} ${r.timeframe} ${r.direction} @${r.entry_price} — ${hasOrder}`);
+      }
+    }
+  } catch (err: any) {
+    console.log(`  ❌ DB ERROR: ${err.message}`);
+  }
+
+  // 8. Equity pending
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        symbol,
+        pattern_type,
+        timeframe,
+        direction,
+        entry_price,
+        score,
+        entry_order_id,
+        created_at
+      FROM live_signals 
+      WHERE status = 'pending' AND symbol NOT LIKE '%/%'
+      ORDER BY score DESC NULLS LAST
+      LIMIT 10
+    `);
+    console.log(`\n  TOP EQUITY PENDING (deferred until market open):`);
+    for (const r of rows) {
+      const hasOrder = r.entry_order_id ? "✅ HAS ORDER" : "⏳ DEFERRED";
+        console.log(`    ${r.symbol} ${r.pattern_type} ${r.timeframe} ${r.direction} @${r.entry_price} score=${r.score || "?"} — ${hasOrder}`);
+    }
+  } catch (err: any) {
+    console.log(`  ❌ DB ERROR: ${err.message}`);
+  }
+
+  // 9. Check market hours logic
+  console.log("\n[8] MARKET HOURS CHECK");
+  const now = new Date();
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const day = et.getDay();
+  const timeMin = et.getHours() * 60 + et.getMinutes();
+  const isOpen = day > 0 && day < 6 && timeMin >= 540 && timeMin <= 990;
+  console.log(`  UTC:      ${now.toISOString()}`);
+  console.log(`  Eastern:  ${et.toLocaleString()}`);
+  console.log(`  Day: ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][day]} (${day})`);
+  console.log(`  Time: ${et.getHours()}:${String(et.getMinutes()).padStart(2,"0")} ET (${timeMin} min)`);
+  console.log(`  Market:   ${isOpen ? "✅ OPEN" : "🔒 CLOSED"}`);
+  console.log(`  Crypto:   ✅ ALWAYS OPEN`);
+
+  await pool.end();
+  console.log("\n=== DIAGNOSTIC COMPLETE ===");
+}
+
+run().catch((err) => {
+  console.error("Diagnostic failed:", err);
+  pool.end();
+});

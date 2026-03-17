@@ -199,7 +199,8 @@ interface WatchlistItem {
 // Constants & helpers
 // ============================================================
 const POLL_INTERVAL = 10_000;
-const MONO = "'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+const MONO = "'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, monospace";
+const DISPLAY = "'Inter', 'SF Pro Display', system-ui, sans-serif";
 
 function fmt(n: number): string {
   const abs = Math.abs(n);
@@ -329,11 +330,11 @@ export default function App() {
   const feed = useMemo<FeedEvent[]>(() => {
     const events: FeedEvent[] = [];
 
-    history.slice(0, 20).forEach((t) => {
+    history.slice(0, 50).forEach((t) => {
       events.push({
         time: t.filled_at,
         tag: "FILL",
-        color: "var(--accent-green)",
+        color: "var(--positive)",
         text: `${(t.direction ?? "").toUpperCase()} ${t.symbol} ${t.pattern ?? "?"} ${(t.qty ?? 0).toFixed(2)} @ ${fmt(t.filled_price)}`,
       });
     });
@@ -345,12 +346,12 @@ export default function App() {
       events.push({
         time: s.createdAt,
         tag: "NEAR",
-        color: dist < 2 ? "var(--accent-amber)" : "var(--text-main)",
+        color: dist < 2 ? "var(--warning)" : "var(--text-primary)",
         text: label + suffix,
       });
     });
 
-    signals.slice(0, 30).forEach((s) => {
+    signals.slice(0, 60).forEach((s) => {
       if (s.status === "closed" || s.status === "cancelled") {
         events.push({
           time: s.createdAt,
@@ -362,14 +363,14 @@ export default function App() {
         events.push({
           time: s.createdAt,
           tag: "SIGNAL",
-          color: "var(--accent-amber)",
+          color: "var(--warning)",
           text: `${(s.direction ?? "").toUpperCase()} ${s.symbol} ${s.patternType} ${s.timeframe} @ ${fmt(Number(s.entryPrice))} — ${s.status}`,
         });
       }
     });
 
     events.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-    return events.slice(0, 50);
+    return events.slice(0, 100);
   }, [history, approaching, signals]);
 
   // Alerts
@@ -384,60 +385,81 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg-main)" }}>
-        <Zap className="w-8 h-8 animate-pulse" style={{ color: "var(--accent-green)" }} />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg-primary)" }}>
+        <div className="flex flex-col items-center gap-3">
+          <Zap className="w-8 h-8 animate-pulse" style={{ color: "var(--sys-light)" }} />
+          <span style={{ fontFamily: DISPLAY, fontSize: "12px", fontWeight: 500, letterSpacing: "2px", textTransform: "uppercase" as const, color: "var(--sys-light)" }}>
+            COMMANDER
+          </span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "var(--bg-main)", fontFamily: MONO, fontSize: "11px" }}>
+    <div className="h-screen flex flex-col overflow-hidden terminal-bg" style={{ background: "var(--bg-primary)", fontFamily: MONO, fontSize: "13px" }}>
       {/* ================================================================ */}
-      {/* HEADER BAR — P&L front and center                                */}
+      {/* HEADER BAR — Hedge fund terminal aesthetic                        */}
       {/* ================================================================ */}
-      <header className="shrink-0 flex items-center justify-between px-4 h-10 border-b" style={{ borderColor: "var(--border-color)" }}>
-        <div className="flex items-center gap-4">
-          <span className="text-xs font-bold text-white tracking-widest">FTM COMMANDER</span>
-          <div className="w-1.5 h-1.5 rounded-full" style={{ background: status?.status === "online" ? "#22c55e" : "#ef4444", boxShadow: status?.status === "online" ? "0 0 4px rgba(34,197,94,0.6)" : undefined }} />
+      <header className="shrink-0 flex items-center justify-between px-5 h-12 border-b" style={{ borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
+        <div className="flex items-center gap-3">
+          <span style={{ fontFamily: DISPLAY, fontSize: "13px", fontWeight: 600, letterSpacing: "2px", textTransform: "uppercase" as const, color: "var(--sys-light)" }}>
+            FTM
+          </span>
+          <span style={{ fontFamily: DISPLAY, fontSize: "11px", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase" as const, color: "var(--sys-dark)" }}>
+            COMMANDER
+          </span>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full" style={{
+              background: status?.status === "online" ? "var(--sys-primary)" : "var(--negative)",
+              boxShadow: status?.status === "online" ? "0 0 6px var(--sys-primary)" : "0 0 6px var(--negative)",
+            }} />
+            <span className="text-[12px] uppercase tracking-wider" style={{ color: status?.status === "online" ? "var(--sys-light)" : "var(--negative)", fontFamily: DISPLAY }}>
+              {status?.status === "online" ? "online" : "offline"}
+            </span>
+          </div>
         </div>
 
-        {/* P&L — the most important number */}
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <span style={{ color: "var(--text-muted)" }}>P&L</span>
-            <span className="text-sm font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>P&L</span>
+            <span className="font-semibold" style={{ fontSize: "16px", color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
               {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
             </span>
-            <span className="text-[10px]" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+            <span className="text-[12px]" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)", opacity: 0.7 }}>
               ({totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%)
             </span>
           </div>
-          <span style={{ color: "var(--border-color)" }}>|</span>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
           <div className="flex items-center gap-2">
-            <span style={{ color: "var(--text-muted)" }}>Day</span>
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>Day</span>
             <span style={{ color: (account?.daily_pl ?? 0) >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
               {(account?.daily_pl ?? 0) >= 0 ? "+" : ""}{fmt(account?.daily_pl ?? 0)}
             </span>
           </div>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>Equity</span>
+            <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{fmt(equity)}</span>
+          </div>
         </div>
 
-        {/* Controls */}
         <div className="flex items-center gap-2">
           {botSettings && (
             <button
               onClick={() => updateSettings({ trading_enabled: !botSettings.trading_enabled })}
-              className="flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold uppercase tracking-wider transition-all"
               style={botSettings.trading_enabled
-                ? { background: "var(--accent-green-dim)", color: "var(--accent-green)", borderColor: "#166534" }
-                : { background: "var(--accent-red-dim)", color: "var(--accent-red)", borderColor: "rgba(127,29,29,0.5)" }}
+                ? { background: "var(--sys-bg)", color: "var(--sys-light)", border: "0.5px solid var(--sys-border)" }
+                : { background: "var(--accent-red-dim)", color: "var(--accent-red)", border: "0.5px solid rgba(239, 68, 68, 0.20)" }}
             >
               <Power className="w-3 h-3" />
-              {botSettings.trading_enabled ? "ON" : "OFF"}
+              {botSettings.trading_enabled ? "LIVE" : "OFF"}
             </button>
           )}
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider"
-            style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)", borderColor: "rgba(127,29,29,0.5)" }}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold uppercase tracking-wider transition-all"
+            style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)", border: "0.5px solid rgba(239, 68, 68, 0.20)" }}
             onClick={async () => {
               if (botSettings?.trading_enabled && confirm("Disable auto-trading?")) {
                 await updateSettings({ trading_enabled: false });
@@ -449,11 +471,11 @@ export default function App() {
           </button>
           <button
             onClick={() => setSettingsOpen((o) => !o)}
-            className="w-7 h-7 rounded flex items-center justify-center border"
+            className="w-7 h-7 rounded-md flex items-center justify-center transition-all"
             style={{
-              background: settingsOpen ? "var(--accent-green-dim)" : "var(--bg-panel)",
-              borderColor: settingsOpen ? "#166534" : "var(--border-color)",
-              color: settingsOpen ? "var(--accent-green)" : "var(--text-muted)",
+              background: settingsOpen ? "var(--sys-bg)" : "transparent",
+              border: settingsOpen ? "0.5px solid var(--sys-border)" : "0.5px solid var(--border-default)",
+              color: settingsOpen ? "var(--sys-light)" : "var(--text-muted)",
             }}
           >
             <Settings className="w-3.5 h-3.5" />
@@ -475,32 +497,33 @@ export default function App() {
       {/* MAIN BODY — left nav sidebar + page content                       */}
       {/* ================================================================ */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT NAV SIDEBAR */}
-        <nav className="shrink-0 flex flex-col items-center py-2 gap-1 border-r" style={{ width: 52, borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+        <nav className="shrink-0 flex flex-col items-center py-3 gap-1.5 border-r" style={{ width: 64, borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
+          <div className="accent-bar mb-2" style={{ width: 28 }} />
           {([
             { key: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
             { key: "trade" as const, icon: BarChart3, label: "Trade" },
             { key: "feed" as const, icon: Radio, label: "Feed" },
-            { key: "signals" as const, icon: Zap, label: "Signals" },
-            { key: "pipeline" as const, icon: Activity, label: "Pipeline" },
-            { key: "scanner" as const, icon: Radar, label: "Scanner" },
-            { key: "diagnostics" as const, icon: Stethoscope, label: "Diagnostics" },
+            { key: "signals" as const, icon: Zap, label: "Sigs" },
+            { key: "pipeline" as const, icon: Activity, label: "Pipe" },
+            { key: "scanner" as const, icon: Radar, label: "Scan" },
+            { key: "diagnostics" as const, icon: Stethoscope, label: "Diag" },
           ] as const).map((item) => {
             const active = activePage === item.key;
             return (
               <button
                 key={item.key}
                 onClick={() => setActivePage(item.key)}
-                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors"
+                className="w-11 h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all"
                 style={{
-                  background: active ? "var(--accent-green-dim)" : "transparent",
-                  color: active ? "var(--accent-green)" : "var(--text-muted)",
-                  border: active ? "1px solid #166534" : "1px solid transparent",
+                  background: active ? "var(--sys-bg)" : "transparent",
+                  color: active ? "var(--sys-light)" : "var(--text-muted)",
+                  border: active ? "0.5px solid var(--sys-border)" : "0.5px solid transparent",
+                  boxShadow: active ? "var(--sys-glow)" : "none",
                 }}
                 title={item.label}
               >
                 <item.icon className="w-4 h-4" />
-                <span className="text-[7px] uppercase tracking-wider font-semibold leading-none">{item.label.slice(0, 5)}</span>
+                <span className="text-[11px] uppercase tracking-wider font-semibold leading-none" style={{ fontFamily: DISPLAY }}>{item.label}</span>
               </button>
             );
           })}
@@ -512,9 +535,9 @@ export default function App() {
           {activePage === "dashboard" && (
             <>
               <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
-                {/* BLOTTER */}
-                <div className="shrink-0 flex items-center justify-between px-3 h-7 border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-                  <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
+                {/* BLOTTER + ACTIVITY SPLIT */}
+                <div className="shrink-0 flex items-center justify-between px-4 h-9 border-b" style={{ borderColor: "var(--border-default)", background: "var(--bg-card)" }}>
+                  <span className="text-[11px] uppercase tracking-widest font-medium" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
                     Positions ({positions.length})
                   </span>
                   <div className="flex gap-2">
@@ -522,10 +545,10 @@ export default function App() {
                       <button
                         key={s}
                         onClick={() => setBlotterSort(s)}
-                        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded"
+                        className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded"
                         style={blotterSort === s
-                          ? { color: "var(--accent-green)", background: "var(--accent-green-dim)" }
-                          : { color: "var(--text-muted)" }}
+                          ? { color: "var(--sys-light)", background: "var(--sys-bg)", border: "0.5px solid var(--sys-border)" }
+                          : { color: "var(--text-muted)", border: "0.5px solid transparent" }}
                       >
                         {s === "pnl" ? "P&L" : s === "pct" ? "%" : "A-Z"}
                       </button>
@@ -533,7 +556,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="shrink-0 grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1 text-[9px] uppercase tracking-wider border-b"
+                <div className="shrink-0 grid grid-cols-[1fr_55px_70px_75px_75px_75px_75px_75px_80px] gap-1 px-4 py-1.5 text-[11px] uppercase tracking-wider border-b"
                   style={{ borderColor: "var(--border-color)", color: "var(--text-muted)", background: "var(--bg-main)" }}>
                   <div>Symbol</div>
                   <div>Side</div>
@@ -555,7 +578,7 @@ export default function App() {
                     sortedPositions.map((p) => (
                       <div
                         key={p.symbol}
-                        className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-b items-center"
+                        className="grid grid-cols-[1fr_55px_70px_75px_75px_75px_75px_75px_80px] gap-1 px-4 py-2 border-b items-center"
                         style={{ borderColor: "rgba(255,255,255,0.03)" }}
                       >
                         <div className="flex items-center gap-2 min-w-0">
@@ -564,7 +587,7 @@ export default function App() {
                         </div>
                         <div>
                           <span
-                            className="text-[9px] px-1 py-px rounded uppercase font-semibold"
+                            className="text-[11px] px-1 py-px rounded uppercase font-semibold"
                             style={{
                               background: p.side === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
                               color: p.side === "long" ? "var(--accent-green)" : "var(--accent-red)",
@@ -588,10 +611,10 @@ export default function App() {
 
                   {positions.length > 0 && (
                     <div
-                      className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-t"
+                      className="grid grid-cols-[1fr_55px_70px_75px_75px_75px_75px_75px_80px] gap-1 px-4 py-2 border-t"
                       style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
                     >
-                      <div className="text-[9px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total</div>
+                      <div className="text-[11px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total</div>
                       <div /><div /><div /><div /><div /><div /><div />
                       <div className="text-right font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
                         {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
@@ -668,7 +691,7 @@ export default function App() {
                   <Row label="Buying Power" value={fmt(bp)} />
                   <Row label="Cash" value={fmt(account?.cash ?? bp)} />
                   <div className="mt-2">
-                    <div className="flex justify-between text-[10px] mb-0.5">
+                    <div className="flex justify-between text-[12px] mb-0.5">
                       <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
                       <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>{lockedPct.toFixed(0)}%</span>
                     </div>
@@ -717,27 +740,27 @@ export default function App() {
           {activePage === "feed" && (
             <div className="flex-1 overflow-y-auto">
               <div className="px-4 py-3">
-                <div className="text-[9px] uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--accent-green)" }}>
+                <div className="text-[11px] uppercase tracking-widest font-medium mb-3" style={{ color: "var(--sys-light)", fontFamily: DISPLAY }}>
                   Live Event Feed ({feed.length})
                 </div>
                 {feed.map((e, i) => (
                   <div key={i} className="flex items-start gap-2 py-1 leading-tight">
-                    <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                    <span className="shrink-0 text-[11px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
                       {ts(e.time)}
                     </span>
                     <span
-                      className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
+                      className="shrink-0 text-[11px] px-1 py-px rounded font-semibold uppercase"
                       style={{
-                        background: e.tag === "FILL" ? "var(--accent-green-dim)"
+                        background: e.tag === "FILL" ? "var(--sys-bg)"
                           : e.tag === "REJECT" ? "var(--accent-red-dim)"
-                          : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
-                          : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
-                          : "rgba(205,166,97,0.15)",
-                        color: e.tag === "FILL" ? "var(--accent-green)"
-                          : e.tag === "REJECT" ? "var(--accent-red)"
-                          : e.tag === "NEAR" ? "var(--accent-amber)"
+                          : e.tag === "NEAR" ? "var(--oracle-bg)"
+                          : e.tag === "CLOSED" ? "rgba(255,255,255,0.04)"
+                          : "var(--oracle-bg)",
+                        color: e.tag === "FILL" ? "var(--sys-light)"
+                          : e.tag === "REJECT" ? "var(--negative)"
+                          : e.tag === "NEAR" ? "var(--oracle-light)"
                           : e.tag === "CLOSED" ? "var(--text-muted)"
-                          : "var(--accent-amber)",
+                          : "var(--oracle-light)",
                       }}
                     >
                       {e.tag}
@@ -752,7 +775,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ============ SIGNALS PAGE ============ */}
+          {/* ============ SIGNALS WATCHBOARD ============ */}
           {activePage === "signals" && (
             <div className="flex-1 overflow-y-auto">
               <SignalPipelineView data={signalPipeline} onSymbolClick={(sym, id, tf) => openChart(sym, id, tf as "4H" | "1D")} />
@@ -799,22 +822,384 @@ export default function App() {
 }
 
 // ============================================================
+// Symbol Watchboard — shows every tracked symbol with phase
+// ============================================================
+const PHASE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  "approaching": { label: "Phase C → D", color: "#fbbf24", bg: "rgba(245,158,11,0.10)", icon: "◎" },
+  "imminent":    { label: "Imminent",     color: "#f97316", bg: "rgba(249,115,22,0.12)", icon: "⚡" },
+  "order":       { label: "Order Live",   color: "#60a5fa", bg: "rgba(59,130,246,0.10)", icon: "●" },
+  "filled":      { label: "In Trade",     color: "#34d399", bg: "rgba(16,185,129,0.10)", icon: "▲" },
+  "exiting":     { label: "Exiting",      color: "#a78bfa", bg: "rgba(139,92,246,0.10)", icon: "◆" },
+  "closed":      { label: "Closed",       color: "var(--text-muted)", bg: "rgba(255,255,255,0.03)", icon: "✓" },
+  "paper":       { label: "Paper Only",   color: "#fbbf24", bg: "rgba(245,158,11,0.06)", icon: "○" },
+};
+
+function getPhaseFromSignal(
+  ap: ApproachingSignal | undefined,
+  sp: SignalPipelineEntry | undefined,
+  hasPosition: boolean
+): { phase: string; description: string; phaseKey: string } {
+  if (hasPosition && sp?.stage === "Exiting") {
+    return { phase: "Exiting", description: "TP/SL exits placed, monitoring", phaseKey: "exiting" };
+  }
+  if (hasPosition || sp?.stage === "Filled") {
+    return { phase: "In Trade", description: "Position filled, managing exits", phaseKey: "filled" };
+  }
+  if (sp?.stage === "Closed") {
+    return { phase: "Closed", description: sp.stageDetail || "Trade completed", phaseKey: "closed" };
+  }
+  if (sp?.stage === "Order Placed") {
+    const dist = ap?.distancePct;
+    const distStr = dist != null ? ` — ${dist.toFixed(1)}% away` : "";
+    return { phase: "Order Live", description: `GTC limit @ ${sp.entryPrice != null ? fmt(sp.entryPrice) : "?"}${distStr}`, phaseKey: "order" };
+  }
+  if (sp?.stage === "Paper Only" || ap?.paperOnly) {
+    const dist = ap?.distancePct;
+    const distStr = dist != null ? `${dist.toFixed(1)}% from D` : "";
+    return { phase: "Paper Only", description: `Tracking ${distStr} — no live order`, phaseKey: "paper" };
+  }
+  if (sp?.stage === "Market Closed") {
+    const dist = ap?.distancePct;
+    const distStr = dist != null ? ` — ${dist.toFixed(1)}% away` : "";
+    return { phase: "Market Closed", description: `Equity order deferred${distStr}`, phaseKey: "approaching" };
+  }
+  if (ap) {
+    const dist = ap.distancePct ?? 999;
+    if (dist <= 2) {
+      return {
+        phase: "Imminent",
+        description: `${dist.toFixed(1)}% from Phase D entry @ ${fmt(ap.projectedD)}`,
+        phaseKey: "imminent",
+      };
+    }
+    if (ap.hasOrder) {
+      return {
+        phase: "Order Live",
+        description: `GTC limit @ ${fmt(ap.projectedD)} — ${dist.toFixed(1)}% away`,
+        phaseKey: "order",
+      };
+    }
+    return {
+      phase: "Phase C → D",
+      description: `Waiting on D @ ${fmt(ap.projectedD)} — ${dist.toFixed(1)}% away`,
+      phaseKey: "approaching",
+    };
+  }
+  if (sp) {
+    return { phase: sp.stage, description: sp.stageDetail || "", phaseKey: "approaching" };
+  }
+  return { phase: "Unknown", description: "", phaseKey: "approaching" };
+}
+
+interface WatchboardSymbol {
+  symbol: string;
+  pattern: string;
+  direction: string;
+  timeframe: string;
+  phaseKey: string;
+  phase: string;
+  description: string;
+  distancePct: number | null;
+  entryPrice: number | null;
+  currentPrice: number | null;
+  sl: number | null;
+  tp1: number | null;
+  rr: number | null;
+  score: number | null;
+  hasOrder: boolean;
+  blocked: string | null;
+  createdAt: string;
+}
+
+function SymbolWatchboard({
+  approaching,
+  signalPipeline,
+  positions,
+}: {
+  approaching: ApproachingSignal[];
+  signalPipeline: SignalPipelineData | null;
+  positions: Position[];
+}) {
+  const [phaseFilter, setPhaseFilter] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<"distance" | "time" | "symbol">("distance");
+
+  const { items, phaseCounts } = useMemo(() => {
+    const positionSymbols = new Set(positions.map((p) => p.symbol));
+    const spMap = new Map<string, SignalPipelineEntry>();
+    if (signalPipeline) {
+      for (const s of signalPipeline.signals) {
+        const key = `${s.symbol}:${s.timeframe}:${s.pattern}`;
+        const existing = spMap.get(key);
+        if (!existing || (s.stage !== "Closed" && s.stage !== "Expired")) {
+          spMap.set(key, s);
+        }
+      }
+    }
+
+    const result: WatchboardSymbol[] = [];
+    const bestBySymbol = new Map<string, WatchboardSymbol>();
+
+    for (const ap of approaching) {
+      const compKey = `${ap.symbol}:${ap.timeframe}:${ap.pattern}`;
+      const sp = spMap.get(compKey);
+      const hasPos = positionSymbols.has(ap.symbol);
+      const { phase, description, phaseKey } = getPhaseFromSignal(ap, sp, hasPos);
+      const item: WatchboardSymbol = {
+        symbol: ap.symbol,
+        pattern: ap.pattern,
+        direction: ap.direction,
+        timeframe: ap.timeframe,
+        phaseKey,
+        phase,
+        description,
+        distancePct: ap.distancePct,
+        entryPrice: ap.projectedD,
+        currentPrice: ap.currentPrice,
+        sl: ap.sl,
+        tp1: ap.tp1,
+        rr: ap.rr ?? null,
+        score: sp?.score ?? null,
+        hasOrder: ap.hasOrder ?? false,
+        blocked: ap.blocked ?? null,
+        createdAt: ap.createdAt,
+      };
+      const existing = bestBySymbol.get(ap.symbol);
+      if (!existing || (item.hasOrder && !existing.hasOrder) || (item.distancePct ?? 999) < (existing.distancePct ?? 999)) {
+        bestBySymbol.set(ap.symbol, item);
+      }
+    }
+
+    if (signalPipeline) {
+      for (const sp of signalPipeline.signals) {
+        if (bestBySymbol.has(sp.symbol)) continue;
+        if (sp.stage === "Expired" || sp.stage === "Dismissed" || sp.stage === "Outranked") continue;
+        if (bestBySymbol.has(sp.symbol)) continue;
+        const hasPos = positionSymbols.has(sp.symbol);
+        const { phase, description, phaseKey } = getPhaseFromSignal(undefined, sp, hasPos);
+        bestBySymbol.set(sp.symbol, {
+          symbol: sp.symbol,
+          pattern: sp.pattern,
+          direction: sp.direction,
+          timeframe: sp.timeframe,
+          phaseKey,
+          phase,
+          description,
+          distancePct: null,
+          entryPrice: sp.entryPrice,
+          currentPrice: null,
+          sl: sp.stopLoss,
+          tp1: sp.tp1,
+          rr: null,
+          score: sp.score,
+          hasOrder: sp.hasOrder,
+          blocked: sp.blockedReason ?? null,
+          createdAt: sp.detectedAt,
+        });
+      }
+    }
+
+    for (const item of bestBySymbol.values()) result.push(item);
+
+    const counts: Record<string, number> = {};
+    for (const it of result) counts[it.phaseKey] = (counts[it.phaseKey] ?? 0) + 1;
+    return { items: result, phaseCounts: counts };
+  }, [approaching, signalPipeline, positions]);
+
+  const sorted = useMemo(() => {
+    const filtered = phaseFilter ? items.filter((i) => i.phaseKey === phaseFilter) : items;
+    return [...filtered].sort((a, b) => {
+      if (sortMode === "distance") {
+        return (a.distancePct ?? 999) - (b.distancePct ?? 999);
+      }
+      if (sortMode === "symbol") return a.symbol.localeCompare(b.symbol);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [items, phaseFilter, sortMode]);
+
+  return (
+    <div style={{ background: "var(--bg-card)" }} className="h-full">
+      <div className="flex items-center gap-1 px-4 py-2.5 flex-wrap border-b" style={{ borderColor: "var(--border-default)" }}>
+        <span className="text-[11px] uppercase tracking-widest font-medium mr-2" style={{ color: "var(--sys-light)", fontFamily: DISPLAY }}>
+          Watchboard
+        </span>
+        <button
+          onClick={() => setPhaseFilter(null)}
+          className="text-[12px] px-2 py-0.5 rounded font-semibold uppercase"
+          style={{
+            background: !phaseFilter ? "var(--sys-bg)" : "rgba(255,255,255,0.04)",
+            color: !phaseFilter ? "var(--sys-light)" : "var(--text-muted)",
+            border: !phaseFilter ? "0.5px solid var(--sys-border)" : "0.5px solid transparent",
+            cursor: "pointer",
+          }}
+        >
+          All {items.length}
+        </button>
+        {Object.entries(PHASE_CONFIG).map(([key, cfg]) => {
+          const count = phaseCounts[key] ?? 0;
+          if (count === 0) return null;
+          return (
+            <button
+              key={key}
+              onClick={() => setPhaseFilter(phaseFilter === key ? null : key)}
+              className="text-[12px] px-2 py-0.5 rounded font-semibold"
+              style={{
+                background: phaseFilter === key ? cfg.bg : "rgba(255,255,255,0.03)",
+                color: cfg.color,
+                border: phaseFilter === key ? `1px solid ${cfg.color}40` : "1px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              {cfg.icon} {cfg.label} {count}
+            </button>
+          );
+        })}
+        <div className="flex-1" />
+        <div className="flex gap-1">
+          {(["distance", "time", "symbol"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSortMode(s)}
+              className="text-[12px] px-1.5 py-0.5 rounded"
+              style={{
+                background: sortMode === s ? "rgba(255,255,255,0.1)" : "transparent",
+                color: sortMode === s ? "white" : "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              {s === "distance" ? "Closest" : s === "time" ? "Recent" : "A-Z"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 110px)" }}>
+        {sorted.length === 0 ? (
+          <div className="p-6 text-center" style={{ color: "var(--text-muted)" }}>
+            No active signals. Scanner is looking for harmonic patterns...
+          </div>
+        ) : (
+          <div className="grid gap-0" style={{ fontFamily: MONO }}>
+            {sorted.map((item) => {
+              const cfg = PHASE_CONFIG[item.phaseKey] ?? PHASE_CONFIG["approaching"];
+              const isHot = item.distancePct !== null && item.distancePct <= 2;
+              return (
+                <div
+                  key={`${item.symbol}-${item.timeframe}-${item.pattern}-${item.createdAt}`}
+                  className="flex items-center gap-3 px-4 py-2.5 border-b transition-colors"
+                  style={{
+                    borderColor: "var(--border-color)",
+                    background: isHot ? "rgba(249,115,22,0.04)" : "transparent",
+                  }}
+                >
+                  <div className="flex items-center gap-2" style={{ minWidth: 120 }}>
+                    <span className="text-[13px]" style={{ color: cfg.color, opacity: 0.7 }}>{cfg.icon}</span>
+                    <span className="text-[14px] font-bold text-white">{item.symbol}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5" style={{ minWidth: 130 }}>
+                    <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{item.pattern}</span>
+                    <span className="text-[11px] px-1 py-px rounded uppercase font-semibold"
+                      style={{
+                        background: item.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                        color: item.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                      }}
+                    >
+                      {item.direction}
+                    </span>
+                    <span className="text-[11px]" style={{ color: "var(--text-dim)" }}>{item.timeframe}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-[11px] px-1.5 py-0.5 rounded font-semibold shrink-0"
+                        style={{ background: cfg.bg, color: cfg.color }}
+                      >
+                        {item.phase}
+                      </span>
+                      <span className="text-[12px] truncate" style={{ color: "var(--text-muted)" }}>
+                        {item.description}
+                      </span>
+                    </div>
+                  </div>
+
+                  {item.distancePct !== null && (
+                    <div className="text-right shrink-0" style={{ minWidth: 55 }}>
+                      <span
+                        className="text-[13px] font-semibold tabular-nums"
+                        style={{
+                          color: item.distancePct <= 1 ? "var(--accent-red)" : item.distancePct <= 2 ? "#f97316" : item.distancePct <= 5 ? "#fbbf24" : "var(--text-muted)",
+                        }}
+                      >
+                        {item.distancePct.toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+
+                  {item.entryPrice !== null && (
+                    <div className="text-right shrink-0" style={{ minWidth: 80 }}>
+                      <div className="text-[11px]" style={{ color: "var(--text-dim)" }}>Entry</div>
+                      <div className="text-[12px] tabular-nums" style={{ color: "var(--text-muted)" }}>{fmt(item.entryPrice)}</div>
+                    </div>
+                  )}
+
+                  {item.currentPrice !== null && (
+                    <div className="text-right shrink-0" style={{ minWidth: 80 }}>
+                      <div className="text-[11px]" style={{ color: "var(--text-dim)" }}>Now</div>
+                      <div className="text-[12px] tabular-nums text-white">{fmt(item.currentPrice)}</div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 shrink-0" style={{ minWidth: 65 }}>
+                    {item.score !== null && (
+                      <span className="text-[11px] tabular-nums" style={{
+                        color: item.score >= 75 ? "var(--accent-green)" : item.score >= 50 ? "#fbbf24" : "var(--text-muted)",
+                      }}>
+                        Q{item.score.toFixed(0)}
+                      </span>
+                    )}
+                    {item.rr !== null && item.rr > 0 && (
+                      <span className="text-[11px] tabular-nums" style={{ color: "var(--text-dim)" }}>
+                        {item.rr.toFixed(1)}R
+                      </span>
+                    )}
+                    {item.hasOrder && (
+                      <span className="text-[11px]" style={{ color: "var(--accent-green)" }}>●</span>
+                    )}
+                  </div>
+
+                  <div className="text-right shrink-0" style={{ minWidth: 40 }}>
+                    <span className="text-[11px]" style={{ color: "var(--text-dim)" }}>
+                      {relativeTime(item.createdAt)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Scan Pipeline
 // ============================================================
 // ============================================================
 // Signal Pipeline View — lifecycle stage for every signal
 // ============================================================
 const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
-  "Detected":      { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
-  "Outranked":     { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
-  "Paper Only":    { bg: "rgba(205,166,97,0.15)",  fg: "var(--accent-amber)" },
-  "Market Closed": { bg: "rgba(205,166,97,0.15)",  fg: "var(--accent-amber)" },
-  "Order Placed":  { bg: "rgba(249,115,22,0.15)",  fg: "#fb923c" },
-  "Filled":        { bg: "rgba(59,130,246,0.15)",  fg: "#60a5fa" },
-  "Exiting":       { bg: "rgba(59,130,246,0.15)",  fg: "#60a5fa" },
-  "Closed":        { bg: "rgba(103,194,152,0.15)", fg: "var(--accent-green)" },
-  "Expired":       { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
-  "Dismissed":     { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
+  "Detected":      { bg: "rgba(139, 92, 246, 0.10)", fg: "#a78bfa" },
+  "Outranked":     { bg: "rgba(255,255,255,0.04)", fg: "var(--text-muted)" },
+  "Paper Only":    { bg: "rgba(245, 158, 11, 0.10)",  fg: "#fbbf24" },
+  "Market Closed": { bg: "rgba(245, 158, 11, 0.10)",  fg: "#fbbf24" },
+  "Order Placed":  { bg: "rgba(249,115,22,0.10)",  fg: "#fb923c" },
+  "Filled":        { bg: "rgba(59,130,246,0.10)",  fg: "#60a5fa" },
+  "Exiting":       { bg: "rgba(59,130,246,0.10)",  fg: "#60a5fa" },
+  "Closed":        { bg: "rgba(16, 185, 129, 0.10)", fg: "var(--sys-light)" },
+  "Expired":       { bg: "rgba(255,255,255,0.04)", fg: "var(--text-muted)" },
+  "Dismissed":     { bg: "rgba(255,255,255,0.04)", fg: "var(--text-muted)" },
 };
 
 function relativeTime(iso: string): string {
@@ -832,7 +1217,7 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
   if (!data) {
     return (
       <div className="p-6 text-center">
-        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
           Waiting for signal data...
         </span>
       </div>
@@ -855,16 +1240,16 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
   });
 
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
-      {/* Summary bar */}
-      <div className="flex items-center gap-1 px-3 py-2 flex-wrap border-b" style={{ borderColor: "var(--border-color)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
+      <div className="flex items-center gap-1 px-3 py-2 flex-wrap border-b" style={{ borderColor: "var(--border-default)" }}>
         <button
           onClick={() => setStageFilter(null)}
-          className="text-[8px] px-1.5 py-0.5 rounded font-semibold uppercase"
+          className="text-[12px] px-1.5 py-0.5 rounded font-semibold uppercase"
           style={{
-            background: !stageFilter ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
-            color: !stageFilter ? "var(--accent-green)" : "var(--text-muted)",
-            border: "none", cursor: "pointer",
+            background: !stageFilter ? "var(--sys-bg)" : "rgba(255,255,255,0.04)",
+            color: !stageFilter ? "var(--sys-light)" : "var(--text-muted)",
+            border: !stageFilter ? "0.5px solid var(--sys-border)" : "0.5px solid transparent",
+            cursor: "pointer",
           }}
         >
           All {data.summary.total}
@@ -877,7 +1262,7 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
             <button
               key={stage}
               onClick={() => setStageFilter(stageFilter === stage ? null : stage)}
-              className="text-[8px] px-1.5 py-0.5 rounded font-semibold"
+              className="text-[12px] px-1.5 py-0.5 rounded font-semibold"
               style={{
                 background: stageFilter === stage ? colors.fg + "33" : colors.bg,
                 color: colors.fg,
@@ -895,7 +1280,7 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
             <button
               key={s}
               onClick={() => setSortBy(s)}
-              className="text-[8px] px-1 py-0.5 rounded"
+              className="text-[12px] px-1 py-0.5 rounded"
               style={{
                 background: sortBy === s ? "rgba(255,255,255,0.1)" : "transparent",
                 color: sortBy === s ? "white" : "var(--text-muted)",
@@ -910,7 +1295,7 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
 
       {/* Signal table */}
       <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 120px)" }}>
-        <table className="w-full text-[10px]" style={{ fontFamily: MONO }}>
+        <table className="w-full text-[12px]" style={{ fontFamily: MONO }}>
           <thead>
             <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border-color)" }}>
               <th className="text-left px-2 py-1.5 font-semibold">Symbol</th>
@@ -938,7 +1323,7 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
                   </td>
                   <td className="px-2 py-1.5">
                     <span
-                      className="text-[8px] px-1 py-px rounded uppercase font-semibold"
+                      className="text-[12px] px-1 py-px rounded uppercase font-semibold"
                       style={{
                         background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
                         color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
@@ -955,7 +1340,7 @@ function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData 
                   </td>
                   <td className="px-2 py-1.5">
                     <span
-                      className="text-[8px] px-1.5 py-0.5 rounded font-semibold"
+                      className="text-[12px] px-1.5 py-0.5 rounded font-semibold"
                       style={{ background: colors.bg, color: colors.fg }}
                     >
                       {s.stage}
@@ -993,7 +1378,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
   if (!data) {
     return (
       <div className="p-6 text-center">
-        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
           Waiting for first scan cycle...
         </span>
       </div>
@@ -1051,14 +1436,14 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
         <div>
           <PipeMetric label="Raw candidates this cycle" value={String(data.rawCandidates)} />
           <div className="mt-3 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
-            <div className="text-[10px] font-semibold mb-2" style={{ color: "var(--text-muted)" }}>MODE 1 — FORMING (PHASE C)</div>
-            <div className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+            <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--text-muted)" }}>MODE 1 — FORMING (PHASE C)</div>
+            <div className="text-[12px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
               5-bar pivot detection → 40 recent pivots → test X-A-B-C groups against 5 patterns (Gartley, Bat, Alt Bat, Butterfly, ABCD) → project D → limit order at projected price
             </div>
           </div>
           <div className="mt-2 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
-            <div className="text-[10px] font-semibold mb-2" style={{ color: "var(--text-muted)" }}>MODE 2 — COMPLETED</div>
-            <div className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+            <div className="text-[12px] font-semibold mb-2" style={{ color: "var(--text-muted)" }}>MODE 2 — COMPLETED</div>
+            <div className="text-[12px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
               All 5 pivots confirmed (X,A,B,C,D) → validates XAD ratio → 3% slippage check → market order if current price near D
             </div>
           </div>
@@ -1076,7 +1461,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="Passed" value={String(data.qualityPassed)} color="var(--accent-green)" />
             <PipeMetric label="Rejected" value={String(data.qualityRejected)} color="var(--accent-red)" />
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
             <span>R1 · XB ratio 0.2 – 1.0</span>
             <span>R5 · Profit target ≥ 2.0%</span>
             <span>R2 · XD within pattern bounds</span>
@@ -1086,7 +1471,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <span>R4 · R:R ≥ 1.0</span>
           </div>
           {data.rawCandidates > 0 && (
-            <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
+            <div className="mt-3 flex items-center gap-2 text-[12px]" style={{ color: "var(--text-muted)" }}>
               <span>{data.rawCandidates} candidates</span>
               <span style={{ color: "var(--accent-green)" }}>→</span>
               <span style={{ color: "var(--accent-green)" }}>{data.qualityPassed} passed</span>
@@ -1123,12 +1508,12 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="Skipped as duplicates" value={String(data.dedupSkipped)} color="var(--accent-amber)" />
           )}
           <div className="mt-2 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
-            <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>LAYER 1 — IN-MEMORY CACHE</div>
-            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Key: symbol:timeframe:pattern:direction · TTL: 4 hours</div>
+            <div className="text-[12px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>LAYER 1 — IN-MEMORY CACHE</div>
+            <div className="text-[12px]" style={{ color: "var(--text-muted)" }}>Key: symbol:timeframe:pattern:direction · TTL: 4 hours</div>
           </div>
           <div className="mt-2 rounded-md border p-3" style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
-            <div className="text-[10px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>LAYER 2 — DATABASE CHECK</div>
-            <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>Window: 14 days for 1D, 7 days for 4H · Survives restarts</div>
+            <div className="text-[12px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>LAYER 2 — DATABASE CHECK</div>
+            <div className="text-[12px]" style={{ color: "var(--text-muted)" }}>Window: 14 days for 1D, 7 days for 4H · Survives restarts</div>
           </div>
         </div>
       ),
@@ -1168,7 +1553,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="Partial exit" value={String(data.partialExits)} color="var(--accent-amber)" />
             <PipeMetric label="Closed" value={String(data.closedTrades)} />
           </div>
-          <div className="flex items-center gap-2 text-[10px] mb-3" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div className="flex items-center gap-2 text-[12px] mb-3" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
             <span>pending</span>
             <span style={{ color: "var(--accent-green)" }}>→</span>
             <span style={{ color: "var(--accent-green)" }}>filled</span>
@@ -1189,18 +1574,18 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
     },
   ];
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
       <div className="p-4">
         {steps.map((step, i) => (
           <div key={step.num} className="flex gap-3" style={{ paddingBottom: i < steps.length - 1 ? 4 : 0 }}>
-            {/* Vertical line + dot */}
             <div className="flex flex-col items-center" style={{ width: 28 }}>
               <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 border cursor-pointer"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0 cursor-pointer transition-all"
                 style={{
-                  background: step.active ? "var(--accent-green-dim)" : "var(--bg-panel)",
-                  borderColor: step.active ? "#166534" : "var(--border-color)",
-                  color: step.active ? "var(--accent-green)" : "var(--text-muted)",
+                  background: step.active ? "var(--sys-bg)" : "var(--bg-card)",
+                  border: step.active ? "0.5px solid var(--sys-border)" : "0.5px solid var(--border-default)",
+                  color: step.active ? "var(--sys-light)" : "var(--text-muted)",
+                  boxShadow: step.active ? "var(--sys-glow)" : "none",
                 }}
                 onClick={() => toggle(step.num)}
               >
@@ -1217,17 +1602,17 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
                 onClick={() => toggle(step.num)}
                 style={{ marginTop: 3 }}
               >
-                <span className="text-xs font-semibold" style={{ color: isOpen(step.num) ? "var(--accent-green)" : "var(--text-main)" }}>
+                <span className="text-xs font-semibold" style={{ color: isOpen(step.num) ? "var(--sys-light)" : "var(--text-primary)", fontFamily: DISPLAY }}>
                   {step.name}
                 </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded" style={{
+                <span className="text-[11px] px-1.5 py-0.5 rounded" style={{
                   background: "var(--bg-main)",
                   color: "var(--text-muted)",
                   fontFamily: "'JetBrains Mono', monospace",
                 }}>
                   {step.tag}
                 </span>
-                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                   {isOpen(step.num) ? "▾" : "▸"}
                 </span>
               </div>
@@ -1246,10 +1631,10 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
 
 function PipeMetric({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="rounded-md p-2" style={{ background: "var(--bg-main)", border: "0.5px solid var(--border-color)" }}>
-      <div className="text-[8px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{label}</div>
-      <div className="text-sm font-bold" style={{ color: color || "white", fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      {sub && <div className="text-[8px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sub}</div>}
+    <div className="rounded-lg p-2" style={{ background: "var(--bg-primary)", border: "0.5px solid var(--border-default)" }}>
+      <div className="text-[12px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)", fontFamily: DISPLAY }}>{label}</div>
+      <div className="text-sm font-semibold" style={{ color: color || "var(--text-primary)" }}>{value}</div>
+      {sub && <div className="text-[12px] mt-0.5" style={{ color: "var(--text-dim)" }}>{sub}</div>}
     </div>
   );
 }
@@ -1258,7 +1643,7 @@ function PipeBullet({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2 py-1">
       <div className="w-1 h-1 rounded-full mt-1.5 shrink-0" style={{ background: "var(--text-muted)" }} />
-      <span className="text-[10px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{text}</span>
+      <span className="text-[12px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{text}</span>
     </div>
   );
 }
@@ -1296,28 +1681,28 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
   };
 
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
       <div className="px-4 py-3">
         {/* Universe summary row */}
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-semibold" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+          <span className="text-[12px] font-semibold" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
             Scanning {(data.total / 2).toLocaleString(undefined, { maximumFractionDigits: 0 })} symbols
             {data.totalUniverse ? ` of ${data.totalUniverse.toLocaleString()} universe` : ""}
           </span>
           {hotCount > 0 && (
-            <span className="text-[9px] px-1 py-px rounded font-bold" style={{ background: "var(--accent-green-dim)", color: "var(--accent-green)" }}>
+            <span className="text-[11px] px-1 py-px rounded font-bold" style={{ background: "var(--accent-green-dim)", color: "var(--accent-green)" }}>
               {hotCount} hot
             </span>
           )}
           {(data.byPhase["D_APPROACHING"] ?? 0) > 0 && (
-            <span className="text-[9px] px-1 py-px rounded font-bold" style={{ background: "rgba(239,68,68,0.15)", color: "var(--accent-red)" }}>
+            <span className="text-[11px] px-1 py-px rounded font-bold" style={{ background: "rgba(239,68,68,0.15)", color: "var(--accent-red)" }}>
               {data.byPhase["D_APPROACHING"]} approaching D
             </span>
           )}
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="ml-auto text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
+            className="ml-auto text-[12px] uppercase tracking-wider px-2 py-0.5 rounded border"
             style={{
               borderColor: "var(--border-color)",
               color: refreshing ? "var(--text-muted)" : "var(--accent-green)",
@@ -1356,7 +1741,7 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
           {phases.map(phase => (
             <div key={phase} className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-sm" style={{ background: PHASE_COLORS[phase] ?? "var(--text-muted)" }} />
-              <span className="text-[9px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+              <span className="text-[11px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
                 {phase.replace("_", " ")}: {data.byPhase[phase] ?? 0}
               </span>
             </div>
@@ -1366,7 +1751,7 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
         {/* Hot symbols */}
         {data.hotSymbols.length > 0 && (
           <div>
-            <div className="text-[9px] uppercase tracking-wider font-semibold mb-2" style={{ color: "var(--accent-green)" }}>
+            <div className="text-[11px] uppercase tracking-wider font-medium mb-2" style={{ color: "var(--sys-light)", fontFamily: DISPLAY }}>
               Hot symbols
             </div>
             <div className="space-y-1">
@@ -1381,7 +1766,7 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
                   }}
                 >
                   {favoriteSet.has(s.symbol) && (
-                    <span className="text-[8px] px-1 py-px rounded font-bold" style={{
+                    <span className="text-[12px] px-1 py-px rounded font-bold" style={{
                       background: "rgba(205,166,97,0.15)",
                       color: "var(--accent-amber)",
                     }}>
@@ -1395,7 +1780,7 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
                   }} onClick={() => onSymbolClick?.(s.symbol)}>
                     {s.symbol}
                   </span>
-                  <span className="text-[9px] px-1 py-px rounded" style={{
+                  <span className="text-[11px] px-1 py-px rounded" style={{
                     background: s.phase === "D_APPROACHING" ? "rgba(239,68,68,0.15)" : "var(--accent-green-dim)",
                     color: s.phase === "D_APPROACHING" ? "var(--accent-red)" : "var(--accent-green)",
                     fontFamily: "'JetBrains Mono', monospace",
@@ -1403,29 +1788,29 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
                     {s.timeframe}
                   </span>
                   {s.bestPattern && (
-                    <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{s.bestPattern}</span>
+                    <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{s.bestPattern}</span>
                   )}
                   {s.bestDirection && (
-                    <span className="text-[9px] font-semibold" style={{
+                    <span className="text-[11px] font-semibold" style={{
                       color: s.bestDirection === "long" ? "var(--accent-green)" : "var(--accent-red)",
                     }}>
                       {s.bestDirection.toUpperCase()}
                     </span>
                   )}
                   {s.projectedD && (
-                    <span className="text-[9px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
+                    <span className="text-[11px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
                       D=${Number(s.projectedD).toFixed(2)}
                     </span>
                   )}
                   {s.distanceToDPct && (
-                    <span className="text-[9px] font-bold" style={{
+                    <span className="text-[11px] font-bold" style={{
                       color: Number(s.distanceToDPct) <= 2 ? "var(--accent-red)" : "var(--accent-amber)",
                       fontFamily: "'JetBrains Mono', monospace",
                     }}>
                       {Number(s.distanceToDPct).toFixed(1)}% away
                     </span>
                   )}
-                  <span className="text-[9px] ml-auto" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                  <span className="text-[11px] ml-auto" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
                     {s.phase === "D_APPROACHING" ? "IMMINENT" : "PROJECTED"}
                   </span>
                 </div>
@@ -1470,7 +1855,7 @@ function DiagnosticsView() {
   if (loading && !data) {
     return (
       <div className="p-6 text-center">
-        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Loading diagnostics...</span>
+        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>Loading diagnostics...</span>
       </div>
     );
   }
@@ -1478,7 +1863,7 @@ function DiagnosticsView() {
   if (error && !data) {
     return (
       <div className="p-6 text-center">
-        <span className="text-[10px]" style={{ color: "var(--accent-red)" }}>Error: {error}</span>
+        <span className="text-[12px]" style={{ color: "var(--accent-red)" }}>Error: {error}</span>
       </div>
     );
   }
@@ -1507,28 +1892,28 @@ function DiagnosticsView() {
   }
 
   return (
-    <div style={{ background: "var(--bg-panel)" }}>
+    <div style={{ background: "var(--bg-card)" }}>
       <div className="px-4 py-3">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--accent-green)" }}>
+          <span className="text-[11px] uppercase tracking-widest font-medium" style={{ color: "var(--sys-light)", fontFamily: DISPLAY }}>
             System Diagnostics
           </span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setAutoRefresh(p => !p)}
-              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
+              className="text-[12px] uppercase tracking-wider px-2 py-0.5 rounded-md"
               style={{
-                borderColor: autoRefresh ? "#166534" : "var(--border-color)",
-                color: autoRefresh ? "var(--accent-green)" : "var(--text-muted)",
-                background: autoRefresh ? "var(--accent-green-dim)" : "transparent",
+                border: autoRefresh ? "0.5px solid var(--sys-border)" : "0.5px solid var(--border-default)",
+                color: autoRefresh ? "var(--sys-light)" : "var(--text-muted)",
+                background: autoRefresh ? "var(--sys-bg)" : "transparent",
               }}
             >
               {autoRefresh ? "Auto 15s" : "Paused"}
             </button>
             <button
               onClick={fetchDiag}
-              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
-              style={{ borderColor: "var(--border-color)", color: "var(--accent-green)", background: "transparent" }}
+              className="text-[12px] uppercase tracking-wider px-2 py-0.5 rounded-md"
+              style={{ border: "0.5px solid var(--sys-border)", color: "var(--sys-light)", background: "transparent" }}
             >
               Refresh
             </button>
@@ -1562,7 +1947,7 @@ function DiagnosticsView() {
             />
             <DiagRow label="Price count" value={String(ws.priceCount ?? 0)} />
             {ws.crypto === "suspended" && (
-              <div className="text-[8px] mt-1 px-1 py-0.5 rounded" style={{ background: "rgba(205,166,97,0.1)", color: "var(--accent-amber)" }}>
+              <div className="text-[12px] mt-1 px-1 py-0.5 rounded" style={{ background: "rgba(205,166,97,0.1)", color: "var(--accent-amber)" }}>
                 WS suspended — using REST fallback
               </div>
             )}
@@ -1606,11 +1991,11 @@ function DiagnosticsView() {
             ))}
             {(scanner.overdueScanners ?? []).length > 0 && (
               <div className="mt-1">
-                <div className="text-[8px] font-semibold mb-1" style={{ color: "var(--accent-red)" }}>
+                <div className="text-[12px] font-semibold mb-1" style={{ color: "var(--accent-red)" }}>
                   OVERDUE ({scanner.overdueScanners.length})
                 </div>
                 {(scanner.overdueScanners as any[]).slice(0, 5).map((s: any, i: number) => (
-                  <div key={i} className="text-[8px]" style={{ color: "var(--accent-red)" }}>
+                  <div key={i} className="text-[12px]" style={{ color: "var(--accent-red)" }}>
                     {s.symbol} {s.timeframe} — {s.overdueMinutes}m late
                   </div>
                 ))}
@@ -1652,9 +2037,9 @@ function DiagnosticsView() {
               />
             ))}
             <div className="mt-1 pt-1" style={{ borderTop: "0.5px solid var(--border-color)" }}>
-              <div className="text-[8px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>BY ASSET CLASS</div>
+              <div className="text-[12px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>BY ASSET CLASS</div>
               {signalSummary.map((row: any, i: number) => (
-                <div key={i} className="flex justify-between text-[9px] py-px">
+                <div key={i} className="flex justify-between text-[11px] py-px">
                   <span style={{ color: "var(--text-muted)" }}>
                     {row.asset_class} {(row.direction ?? "").toUpperCase()} {row.status}
                   </span>
@@ -1666,10 +2051,10 @@ function DiagnosticsView() {
 
           <DiagSection title={`Stale Signals (${staleSignals.length})`}>
             {staleSignals.length === 0 ? (
-              <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>No stale signals (48h+)</div>
+              <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>No stale signals (48h+)</div>
             ) : (
               staleSignals.map((s: any, i: number) => (
-                <div key={i} className="flex justify-between text-[9px] py-px">
+                <div key={i} className="flex justify-between text-[11px] py-px">
                   <span style={{ color: "var(--accent-amber)" }}>{s.symbol}</span>
                   <span style={{ color: "var(--text-muted)" }}>{s.status}</span>
                   <span style={{ color: "var(--text-muted)" }}>
@@ -1682,13 +2067,13 @@ function DiagnosticsView() {
 
           <DiagSection title="Recent Orders">
             {(orders.orders ?? []).length === 0 ? (
-              <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>No open orders</div>
+              <div className="text-[11px]" style={{ color: "var(--text-muted)" }}>No open orders</div>
             ) : (
               <div className="space-y-0.5">
                 {(orders.orders as any[]).slice(0, 10).map((o: any, i: number) => (
-                  <div key={i} className="flex items-center gap-1 text-[9px]">
+                  <div key={i} className="flex items-center gap-1 text-[11px]">
                     <span
-                      className="px-1 py-px rounded text-[8px] font-bold uppercase"
+                      className="px-1 py-px rounded text-[12px] font-bold uppercase"
                       style={{
                         background: o.side === "buy" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
                         color: o.side === "buy" ? "var(--accent-green)" : "var(--accent-red)",
@@ -1717,8 +2102,8 @@ function DiagnosticsView() {
 
 function DiagSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-md p-2" style={{ background: "var(--bg-main)", border: "0.5px solid var(--border-color)" }}>
-      <div className="text-[8px] uppercase tracking-wider font-semibold mb-1.5" style={{ color: "var(--text-muted)" }}>{title}</div>
+    <div className="rounded-lg p-2.5 card-glow transition-all" style={{ background: "var(--bg-primary)", border: "0.5px solid var(--border-default)" }}>
+      <div className="text-[12px] uppercase tracking-wider font-medium mb-1.5" style={{ color: "var(--text-secondary)", fontFamily: "'Inter', sans-serif" }}>{title}</div>
       {children}
     </div>
   );
@@ -1727,10 +2112,10 @@ function DiagSection({ title, children }: { title: string; children: React.React
 function DiagRow({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
     <div className="flex justify-between items-baseline py-px">
-      <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{label}</span>
+      <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{label}</span>
       <div className="flex items-baseline gap-1">
-        {sub && <span className="text-[8px]" style={{ color: "var(--text-muted)", opacity: 0.6 }}>{sub}</span>}
-        <span className="text-[9px] font-semibold" style={{ color: color ?? "white" }}>{value}</span>
+        {sub && <span className="text-[12px]" style={{ color: "var(--text-dim)", opacity: 0.6 }}>{sub}</span>}
+        <span className="text-[11px] font-semibold" style={{ color: color ?? "var(--text-primary)" }}>{value}</span>
       </div>
     </div>
   );
@@ -1743,7 +2128,7 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
   return (
     <div className="flex justify-between py-0.5">
       <span style={{ color: "var(--text-muted)" }}>{label}</span>
-      <span className="font-semibold" style={{ color: color || "white" }}>{value}</span>
+      <span className="font-semibold" style={{ color: color || "var(--text-primary)" }}>{value}</span>
     </div>
   );
 }
@@ -2341,10 +2726,9 @@ function SettingsDrawer({
   };
 
   return (
-    <div className="shrink-0 border-b px-4 py-3 flex gap-8 overflow-x-auto" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-      {/* Patterns */}
+    <div className="shrink-0 border-b px-4 py-3 flex gap-8 overflow-x-auto" style={{ borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
       <div>
-        <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Patterns</div>
+        <div className="text-[11px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Patterns</div>
         <div className="flex gap-1.5">
           {(["Gartley", "Bat", "Alt Bat", "Butterfly", "ABCD"] as const).map((p) => {
             const on = botSettings?.enabled_patterns?.includes(p) ?? true;
@@ -2356,10 +2740,10 @@ function SettingsDrawer({
                   const next = on ? botSettings.enabled_patterns.filter((x) => x !== p) : [...botSettings.enabled_patterns, p];
                   if (next.length > 0) updateSettings({ enabled_patterns: next });
                 }}
-                className="px-2 py-1 rounded border text-[10px] transition-colors"
+                className="px-2 py-1 rounded border text-[12px] transition-colors"
                 style={on
-                  ? { background: "var(--accent-green-dim)", color: "var(--accent-green)", borderColor: "#166534" }
-                  : { background: "var(--bg-main)", color: "var(--text-muted)", borderColor: "var(--border-color)" }}
+                  ? { background: "var(--sys-bg)", color: "var(--sys-light)", border: "0.5px solid var(--sys-border)" }
+                  : { background: "var(--bg-primary)", color: "var(--text-muted)", border: "0.5px solid var(--border-default)" }}
               >
                 {p}
               </button>
@@ -2371,15 +2755,15 @@ function SettingsDrawer({
       {/* Sizing */}
       {botSettings && (
         <div className="min-w-[200px]">
-          <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Sizing</div>
-          <div className="flex items-center gap-2 text-[10px]">
+          <div className="text-[11px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>Sizing</div>
+          <div className="flex items-center gap-2 text-[12px]">
             <span style={{ color: "var(--text-muted)" }}>STK</span>
             <input type="range" min="1" max="20" value={Math.round(botSettings.equity_allocation * 100)}
               onChange={(e) => updateSettings({ equity_allocation: Number(e.target.value) / 100 })}
               className="flex-1 h-1" style={{ accentColor: "var(--accent-green)" }} />
             <span className="text-white w-7 text-right">{Math.round(botSettings.equity_allocation * 100)}%</span>
           </div>
-          <div className="flex items-center gap-2 text-[10px] mt-1">
+          <div className="flex items-center gap-2 text-[12px] mt-1">
             <span style={{ color: "var(--text-muted)" }}>CRY</span>
             <input type="range" min="1" max="20" value={Math.round(botSettings.crypto_allocation * 100)}
               onChange={(e) => updateSettings({ crypto_allocation: Number(e.target.value) / 100 })}
@@ -2391,7 +2775,7 @@ function SettingsDrawer({
 
       {/* Watchlist */}
       <div className="min-w-[300px]">
-        <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+        <div className="text-[11px] uppercase tracking-widest font-medium mb-2" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
           Watchlist ({watchlist.length})
         </div>
         <div className="flex gap-1.5 mb-2">
@@ -2401,17 +2785,17 @@ function SettingsDrawer({
             onChange={(e) => setNewSymbol(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addSymbol()}
             placeholder="Add symbol..."
-            className="rounded px-2 py-1 text-[10px] focus:outline-none w-32"
+            className="rounded px-2 py-1 text-[12px] focus:outline-none w-32"
             style={{ background: "var(--bg-main)", border: "1px solid var(--border-color)", color: "var(--text-main)", fontFamily: "inherit" }}
           />
-          <button onClick={addSymbol} className="rounded px-2 py-1 text-[10px] flex items-center gap-1"
+          <button onClick={addSymbol} className="rounded px-2 py-1 text-[12px] flex items-center gap-1"
             style={{ background: "rgba(205,166,97,0.1)", color: "var(--accent-amber)", border: "1px solid rgba(205,166,97,0.2)" }}>
             <Plus className="w-3 h-3" /> Add
           </button>
         </div>
         <div className="flex flex-wrap gap-1">
           {watchlist.map((w) => (
-            <div key={w.symbol} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] border"
+            <div key={w.symbol} className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] border"
               style={{ background: "var(--bg-main)", borderColor: "var(--border-color)" }}>
               <span className="w-1 h-1 rounded-full" style={{ background: w.assetClass === "crypto" ? "var(--accent-amber)" : "var(--accent-green)" }} />
               <span className="text-white">{w.symbol}</span>

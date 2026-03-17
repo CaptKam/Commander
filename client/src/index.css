@@ -1,34 +1,163 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg-main: #101416;
-  --bg-panel: #151a1d;
-  --bg-panel-hover: #1b2226;
-  --border-color: #273136;
-  --text-muted: #7a8891;
-  --text-main: #d1d5db;
+  /* Dark terminal background */
+  --bg-primary: #0a0f1a;
+  --bg-secondary: #0f1420;
+  --bg-card: #111827;
+  --bg-elevated: #1a2035;
+
+  /* Legacy aliases */
+  --bg-main: var(--bg-primary);
+  --bg-panel: var(--bg-card);
+  --bg-panel-hover: var(--bg-elevated);
+
+  /* Borders */
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.12);
+  --border-active: rgba(255, 255, 255, 0.20);
+  --border-color: var(--border-default);
+
+  /* Text */
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-dim: #475569;
+  --text-main: var(--text-primary);
   --text-bright: #ffffff;
-  --accent-green: #67c298;
-  --accent-green-dim: #213a2f;
-  --accent-red: #de6b6b;
-  --accent-red-dim: #3a2223;
-  --accent-amber: #cda661;
+
+  /* Semantic */
+  --positive: #10b981;
+  --positive-dim: #065f46;
+  --negative: #ef4444;
+  --negative-dim: #7f1d1d;
+  --warning: #f59e0b;
+  --neutral: #6b7280;
+
+  /* Legacy semantic aliases */
+  --accent-green: #34d399;
+  --accent-green-dim: rgba(16, 185, 129, 0.08);
+  --accent-red: #ef4444;
+  --accent-red-dim: rgba(239, 68, 68, 0.08);
+  --accent-amber: #f59e0b;
+
+  /* Active system — COMMANDER (Platinum) */
+  --sys-primary: var(--commander-primary);
+  --sys-light: var(--commander-light);
+  --sys-lighter: var(--commander-lighter);
+  --sys-dark: var(--commander-dark);
+  --sys-bg: var(--commander-bg);
+  --sys-border: var(--commander-border);
+  --sys-glow: var(--commander-glow);
+
+  /* ATLAS — Emerald (Technical Analysis) — primary system */
+  --atlas-primary: #10b981;
+  --atlas-light: #34d399;
+  --atlas-lighter: #6ee7b7;
+  --atlas-dark: #059669;
+  --atlas-bg: rgba(16, 185, 129, 0.08);
+  --atlas-border: rgba(16, 185, 129, 0.20);
+  --atlas-glow: 0 0 20px rgba(16, 185, 129, 0.15);
+
+  /* POTUS — Red */
+  --potus-primary: #ef4444;
+  --potus-light: #f87171;
+  --potus-lighter: #fca5a5;
+  --potus-dark: #dc2626;
+  --potus-bg: rgba(239, 68, 68, 0.08);
+  --potus-border: rgba(239, 68, 68, 0.20);
+  --potus-glow: 0 0 20px rgba(239, 68, 68, 0.15);
+
+  /* ORACLE — Amber */
+  --oracle-primary: #f59e0b;
+  --oracle-light: #fbbf24;
+  --oracle-lighter: #fcd34d;
+  --oracle-dark: #d97706;
+  --oracle-bg: rgba(245, 158, 11, 0.08);
+  --oracle-border: rgba(245, 158, 11, 0.20);
+  --oracle-glow: 0 0 20px rgba(245, 158, 11, 0.15);
+
+  /* JARVIS — Violet */
+  --jarvis-primary: #8b5cf6;
+  --jarvis-light: #a78bfa;
+  --jarvis-lighter: #c4b5fd;
+  --jarvis-dark: #7c3aed;
+  --jarvis-bg: rgba(139, 92, 246, 0.08);
+  --jarvis-border: rgba(139, 92, 246, 0.20);
+  --jarvis-glow: 0 0 20px rgba(139, 92, 246, 0.15);
+
+  /* COMMANDER — Platinum */
+  --commander-primary: #e2e8f0;
+  --commander-light: #f1f5f9;
+  --commander-lighter: #f8fafc;
+  --commander-dark: #cbd5e1;
+  --commander-bg: rgba(226, 232, 240, 0.06);
+  --commander-border: rgba(226, 232, 240, 0.15);
+  --commander-glow: 0 0 20px rgba(226, 232, 240, 0.10);
+
+  /* Typography */
+  --font-display: 'Inter', 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+
+  /* Metric font sizes */
+  --metric-large: 28px;
+  --metric-medium: 18px;
+  --metric-small: 13px;
+  --label: 11px;
 }
 
 body {
-  background-color: var(--bg-main);
-  color: var(--text-main);
-  font-family: system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-main);
+  background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Card hover glow */
+.card-glow:hover {
+  border-color: var(--sys-border) !important;
+  box-shadow: var(--sys-glow);
+}
+
+/* Accent bar */
+.accent-bar {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, var(--sys-dark), var(--sys-light));
+}
+
+/* Status pulse */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Subtle grain texture overlay */
+.terminal-bg {
+  position: relative;
+}
+.terminal-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(226, 232, 240, 0.02) 0%, transparent 70%);
+  pointer-events: none;
 }
