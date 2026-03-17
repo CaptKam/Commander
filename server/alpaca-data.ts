@@ -207,15 +207,17 @@ function appendBars(
 
 // ============================================================
 // Batch chunking — split large symbol lists to avoid pagination
-// truncation. 5 symbols × ~360 candles = ~1,800 bars per chunk,
-// well within 1–2 pages of Alpaca's 10,000-bar page limit.
+// truncation. Crypto needs smaller batches (2) because 4H bars
+// span many pages even at low symbol counts. Stocks can handle
+// slightly more (3) since they have fewer gaps.
 // ============================================================
-const CHUNK_SIZE = 5;
+const CRYPTO_CHUNK_SIZE = 2;  // Was 5 — Alpaca 4H pagination needs smaller batches
+const STOCK_CHUNK_SIZE = 3;   // Stocks have fewer gaps, can handle slightly larger batches
 
-function chunkArray(arr: string[]): string[][] {
+function chunkArray(arr: string[], chunkSize: number): string[][] {
   const chunks: string[][] = [];
-  for (let i = 0; i < arr.length; i += CHUNK_SIZE) {
-    chunks.push(arr.slice(i, i + CHUNK_SIZE));
+  for (let i = 0; i < arr.length; i += chunkSize) {
+    chunks.push(arr.slice(i, i + chunkSize));
   }
   return chunks;
 }
@@ -232,7 +234,7 @@ async function fetchStockBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
-  const chunks = chunkArray(symbols);
+  const chunks = chunkArray(symbols, STOCK_CHUNK_SIZE);
   for (const chunk of chunks) {
     const chunkResult = await fetchStockBarsChunk(chunk, timeframe, key, secret);
     for (const [sym, candles] of chunkResult) {
@@ -340,7 +342,7 @@ async function fetchCryptoBars(
   const results = new Map<string, Candle[]>();
   if (symbols.length === 0) return results;
 
-  const chunks = chunkArray(symbols);
+  const chunks = chunkArray(symbols, CRYPTO_CHUNK_SIZE);
   for (const chunk of chunks) {
     const chunkResult = await fetchCryptoBarsChunk(chunk, timeframe, key, secret);
     for (const [sym, candles] of chunkResult) {
