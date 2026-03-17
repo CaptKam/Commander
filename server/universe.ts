@@ -115,6 +115,9 @@ async function fetchAlpacaAssets(): Promise<{ equities: AlpacaAsset[]; crypto: A
 // ============================================================
 const MAJOR_EXCHANGES = new Set(["NYSE", "NASDAQ", "AMEX", "ARCA", "BATS"]);
 
+// Name-based filter: Alpaca marks warrants, units, and rights in the asset name
+const JUNK_NAME_RE = /\bwarrant|warrant\b|\bunit\b|\bright\b/i;
+
 function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): FilteredAsset[] {
   const results: FilteredAsset[] = [];
 
@@ -125,6 +128,9 @@ function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): 
     if (!MAJOR_EXCHANGES.has(asset.exchange)) continue;
     if (asset.symbol.includes(".") || asset.symbol.includes("/")) continue;
     if (asset.symbol.length > 5) continue;
+    // Filter out warrants, units, rights (detected by name, not symbol suffix —
+    // suffix-based filtering would kill legitimate tickers like SNOW, UBER)
+    if (JUNK_NAME_RE.test(asset.name)) continue;
 
     results.push({
       symbol: asset.symbol,

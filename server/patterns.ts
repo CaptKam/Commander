@@ -664,6 +664,27 @@ export function detectPatternPhase(
       const abcMid = (pat.abc.min + pat.abc.max) / 2;
       const fibDev = Math.abs(xabRatio - xabMid) + Math.abs(abcRatio - abcMid);
 
+      // Record BC_FORMING as a floor — even if D is already hit or invalid,
+      // we know XABC are valid and the symbol is worth scanning more often.
+      if (
+        PHASE_DEPTH.BC_FORMING > PHASE_DEPTH[deepest.phase] ||
+        (PHASE_DEPTH.BC_FORMING === PHASE_DEPTH[deepest.phase] && fibDev < bestFibDeviation)
+      ) {
+        deepest = {
+          phase: "BC_FORMING",
+          bestPattern: pat.name,
+          bestDirection: direction,
+          pivotCount: pivots.length,
+          xPrice: X.price,
+          aPrice: A.price,
+          bPrice: B.price,
+          cPrice: C.price,
+          projectedD: null,
+          distanceToDPct: null,
+        };
+        bestFibDeviation = fibDev;
+      }
+
       // Project D
       const xaLeg = X.price - A.price;
       const midXAD = (pat.xad.min + pat.xad.max) / 2;
