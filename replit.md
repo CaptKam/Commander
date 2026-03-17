@@ -61,17 +61,14 @@ Run command: `npm start` (Express serves static frontend + runs trading engine o
 
 The frontend (`client/src/App.tsx`) is a single-page app with top navigation tabs and left sidebar navigation:
 
-**Top Navigation Tabs:**
-- **TERMINAL** — Main trading view with 3-panel layout (sidebar, DOM, execution engine)
-- **ANALYTICS** — Pattern distribution, direction/timeframe breakdown, top symbols, complete trade history
-- **RISK ENGINE** — Capital allocation, risk parameters, position risk breakdown, upcoming entry risk assessment
-- **LOGS** — Unified event timeline combining signals, scans, and fills with timestamps and level indicators
+**Bottom Tabs (Main View):**
+- **LIVE FEED** — Unified event timeline: signals, approaching trades, fills, and closed trades
+- **PIPELINE** — 8-step scan pipeline visualization with expand/collapse per step
+- **SCANNER** — Phase distribution bar, hot symbols, universe stats
+- **DIAGNOSTICS** — Comprehensive system health dashboard: system uptime, WebSocket stream status, data cache stats, pipeline summary, scanner phase distribution with overdue alerts, open Alpaca orders, account equity/buying power, signal breakdown by status/asset class/direction, and stale signal detection (48h+). Auto-refreshes every 15 seconds via `/api/diagnostics/full`.
 
-**Left Sidebar (Terminal tab):**
-- **EXECUTE** — Tactical Depth of Market view showing approaching short/long signals and open positions
-- **PORTFOLIO** — Detailed positions table with entry/current/SL/TP levels, plus recent trade history
-- **SLIPPAGE HUB** — Fill quality analysis comparing expected vs actual fill prices with quality ratings
-- **RISK GUARD** — Risk limits visualization, exposure bars, approaching trade risk preview, enabled patterns
+**Right Sidebar:**
+- Risk (equity, buying power, GTC locked %), Stats (win rate, W/L, profit factor), Imminent approaching trades, Alerts, Recent fills
 
 All pages pull live data from the backend API endpoints and auto-refresh every 10 seconds.
 

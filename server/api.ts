@@ -930,6 +930,156 @@ router.get("/diagnostics/equity", async (_req, res) => {
 });
 
 /**
+ * GET /api/diagnostics/full — Comprehensive system diagnostics aggregator.
+ * Single endpoint that pulls scanner health, pipeline, orders, signals, account,
+ * websocket, and scan-state data for the diagnostics page.
+ */
+router.get("/diagnostics/full", async (_req, res) => {
+  try {
+    const headers = alpacaHeaders();
+
+    const dbAndApiPromises: Promise<any>[] = [
+      db.execute(sql`
+        SELECT
+          CASE WHEN symbol LIKE '%/%' THEN 'crypto' ELSE 'equity' END as asset_class,
+          direction,
+          status,
+          COUNT(*) as count
+        FROM live_signals
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+      `),
+      db.execute(sql`
+        SELECT phase, COUNT(*) as count,
+               COUNT(*) FILTER (WHERE next_scan_due <= NOW()) as due_now
+        FROM symbol_scan_state
+        GROUP BY phase
+      `),
+      db.execute(sql`
+        SELECT symbol, timeframe, phase,
+               EXTRACT(EPOCH FROM (NOW() - next_scan_due)) / 60 as overdue_minutes
+        FROM symbol_scan_state
+        WHERE next_scan_due < NOW() - INTERVAL '5 minutes'
+        ORDER BY next_scan_due ASC
+        LIMIT 10
+      `),
+      db.execute(sql`
+        SELECT id, symbol, status, entry_order_id, created_at
+        FROM live_signals
+        WHERE status IN ('pending', 'paper_only')
+          AND created_at < NOW() - INTERVAL '48 hours'
+        ORDER BY created_at ASC
+        LIMIT 20
+      `),
+      db.execute(sql`SELECT COUNT(*) as total FROM symbol_scan_state`),
+    ];
+
+    if (headers) {
+      dbAndApiPromises.push(
+        fetch(`${ALPACA_BASE_URL}/v2/orders?status=open&limit=200`, { headers }).then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${ALPACA_BASE_URL}/v2/account`, { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+      );
+    }
+
+    const results = await Promise.allSettled(dbAndApiPromises);
+    const val = (i: number, fallback: any = { rows: [] }) => results[i]?.status === "fulfilled" ? results[i].value : fallback;
+
+    const signalSummaryResult = val(0);
+    const phaseAggResult = val(1);
+    const overdueResult = val(2);
+    const staleSignalsResult = val(3);
+    const totalSlotsResult = val(4);
+    const openOrders: any[] = headers ? (val(5, []) as any[]) : [];
+    const accountData: any = headers ? val(6, null) : null;
+
+    const wsStatus = getStreamStatus();
+    const cacheStats = getCacheStats();
+    const uptimeSeconds = Math.floor(process.uptime());
+
+    const phaseRows = phaseAggResult.rows as any[];
+    const phaseDistribution: Record<string, number> = {};
+    let dueNow = 0;
+    for (const r of phaseRows) {
+      phaseDistribution[r.phase ?? "UNKNOWN"] = Number(r.count ?? 0);
+      dueNow += Number(r.due_now ?? 0);
+    }
+    const totalScanSlots = Number((totalSlotsResult.rows?.[0] as any)?.total ?? 0);
+
+    const overdueScanners = (overdueResult.rows as any[]).map((r: any) => ({
+      symbol: r.symbol,
+      timeframe: r.timeframe,
+      phase: r.phase,
+      overdueMinutes: Math.round(Number(r.overdue_minutes ?? 0)),
+    }));
+
+    const ordersSummary = {
+      total: openOrders.length,
+      buy: openOrders.filter((o: any) => o.side === "buy").length,
+      sell: openOrders.filter((o: any) => o.side === "sell").length,
+      totalNotional: openOrders.reduce((sum: number, o: any) => {
+        const qty = parseFloat(o.qty || "0");
+        const price = parseFloat(o.limit_price || o.stop_price || "0");
+        return sum + qty * price;
+      }, 0),
+      orders: openOrders.slice(0, 20).map((o: any) => ({
+        id: o.id,
+        symbol: o.symbol,
+        side: o.side,
+        qty: o.qty,
+        limitPrice: o.limit_price,
+        type: o.type,
+        status: o.status,
+        submittedAt: o.submitted_at,
+        ageMinutes: o.submitted_at ? Math.floor((Date.now() - new Date(o.submitted_at).getTime()) / 60000) : null,
+      })),
+    };
+
+    res.json({
+      system: {
+        uptime: uptimeSeconds,
+        uptimeFormatted: `${Math.floor(uptimeSeconds / 3600)}h ${Math.floor((uptimeSeconds % 3600) / 60)}m`,
+        scanCount: totalScanCount,
+        lastScanAgeSeconds: lastScanTimestamp > 0 ? Math.floor((Date.now() - lastScanTimestamp) / 1000) : null,
+        lastScanCandidates,
+        lastScanPassedFilter,
+        filterPassRate: lastScanCandidates > 0 ? Math.round((lastScanPassedFilter / lastScanCandidates) * 100) : 0,
+        marketOpen: isStockMarketOpen(),
+      },
+      websocket: wsStatus,
+      cache: cacheStats,
+      pipeline: {
+        ...pipelineStats,
+        lastUpdatedAgo: pipelineStats.lastUpdated > 0
+          ? Math.floor((Date.now() - pipelineStats.lastUpdated) / 1000)
+          : null,
+      },
+      scanner: {
+        totalSlots: totalScanSlots,
+        dueNow,
+        phaseDistribution,
+        overdueScanners,
+      },
+      orders: ordersSummary,
+      account: accountData ? {
+        equity: parseFloat(accountData.equity ?? "0"),
+        buyingPower: parseFloat(accountData.buying_power ?? "0"),
+        cash: parseFloat(accountData.cash ?? "0"),
+        portfolioValue: parseFloat(accountData.portfolio_value ?? "0"),
+        daytradeCount: accountData.daytrade_count ?? 0,
+        patternDayTrader: accountData.pattern_day_trader ?? false,
+      } : null,
+      signals: {
+        summary: signalSummaryResult.rows,
+        stale: staleSignalsResult.rows,
+      },
+    });
+  } catch (err) {
+    console.error("[API] Full diagnostics failed:", err);
+    res.status(500).json({ error: "Diagnostics query failed" });
+  }
+});
+
+/**
  * GET /api/health — Simple health check for Render.
  */
 router.get("/health", (_req, res) => {
