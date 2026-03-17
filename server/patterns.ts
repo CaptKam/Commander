@@ -190,6 +190,14 @@ export function detectHarmonics(
       continue;
     }
 
+    // ---- Recency filter: reject stale patterns from months ago ----
+    // Point C must be within the last N candles, otherwise the pattern
+    // formed too long ago and projected D is no longer actionable.
+    const MAX_C_AGE = timeframe === "1D" ? 40 : 60; // 40 daily or 60 4H candles
+    if (C.index < candles.length - MAX_C_AGE) {
+      continue;
+    }
+
     // ---- Minimum leg filter: reject micro-noise pivots ----
     const xaSize = Math.abs(X.price - A.price);
     const midPrice = (X.price + A.price) / 2;
@@ -247,13 +255,29 @@ export function detectHarmonics(
         continue;
       }
 
-      // ---- Check D hasn't already been hit (still forming) ----
+      // ---- Check D hasn't already been hit AND is far enough from current price ----
       const lastCandle = candles[candles.length - 1];
+      const lastClose = lastCandle.close;
+
+      // D already reached — pattern is complete, not forming
       if (direction === "long" && lastCandle.low <= projectedD) {
-        continue; // D zone already reached — no longer "forming"
+        continue;
       }
       if (direction === "short" && lastCandle.high >= projectedD) {
-        continue; // D zone already reached
+        continue;
+      }
+
+      // D must be meaningfully away from current price in the correct direction.
+      // For LONG: D should be BELOW current price (buy the dip)
+      // For SHORT: D should be ABOVE current price (sell the rally)
+      // Minimum 1% distance prevents orders that fill instantly like market orders.
+      const MIN_D_DISTANCE_PCT = 0.01; // 1% minimum distance
+
+      if (direction === "long" && projectedD >= lastClose * (1 - MIN_D_DISTANCE_PCT)) {
+        continue; // D is at or above current price — would fill instantly
+      }
+      if (direction === "short" && projectedD <= lastClose * (1 + MIN_D_DISTANCE_PCT)) {
+        continue; // D is at or below current price — would fill instantly
       }
 
       // ---- Calculate TP and SL (Anti-NULL Rule: CLAUDE.md Rule #2) ----
