@@ -12,6 +12,7 @@
 import { db } from "./db";
 import { symbolScanState, watchlist } from "../shared/schema";
 import type { PatternPhaseResult } from "./patterns";
+import type { FilteredAsset } from "./universe";
 import { lte, inArray, asc, sql } from "drizzle-orm";
 
 // ============================================================
@@ -63,6 +64,7 @@ export interface ScanJob {
   currentPhase: string;
   isNew: boolean;        // true if no scan_state row exists yet
   scanStateId: number | null; // null if isNew
+  isFavorite: boolean;   // true if this symbol is in the watchlist table
 }
 
 // Phase priority for sorting (higher = more urgent)
@@ -83,6 +85,10 @@ const PHASE_PRIORITY: Record<string, number> = {
 export async function getSymbolsDueForScan(): Promise<ScanJob[]> {
   const jobs: ScanJob[] = [];
 
+  // ---- Build favorites set for isFavorite tagging ----
+  const allWatchlist = await db.select().from(watchlist);
+  const favoriteSymbols = new Set(allWatchlist.map((w) => w.symbol));
+
   // ---- 1. Get all rows where next_scan_due has passed ----
   const dueRows = await db
     .select()
@@ -96,11 +102,11 @@ export async function getSymbolsDueForScan(): Promise<ScanJob[]> {
       currentPhase: row.phase,
       isNew: false,
       scanStateId: row.id,
+      isFavorite: favoriteSymbols.has(row.symbol),
     });
   }
 
   // ---- 2. Find watchlist symbols with no scan_state entry (new symbols) ----
-  const allWatchlist = await db.select().from(watchlist);
   const existingKeys = new Set(
     (await db
       .select({ symbol: symbolScanState.symbol, timeframe: symbolScanState.timeframe })
@@ -118,6 +124,7 @@ export async function getSymbolsDueForScan(): Promise<ScanJob[]> {
           currentPhase: "NO_PATTERN",
           isNew: true,
           scanStateId: null,
+          isFavorite: true, // watchlist symbols are always favorites
         });
       }
     }
@@ -260,6 +267,98 @@ export async function initializeScanStates(
   } catch (err) {
     console.error("[Scheduler] Failed to initialize scan states:", err);
   }
+}
+
+// ============================================================
+// Universe Seeding — populate scan_state from full asset list
+// ============================================================
+
+/**
+ * Seeds symbol_scan_state from the full Alpaca universe.
+ * New symbols get staggered nextScanDue to prevent thundering herd.
+ * Delisted symbols get paused (nextScanDue pushed 30 days out).
+ */
+export async function seedUniverse(
+  assets: FilteredAsset[],
+): Promise<{ seeded: number; existing: number; removed: number }> {
+  // 1. Get all existing rows
+  const existingRows = await db
+    .select({ symbol: symbolScanState.symbol, timeframe: symbolScanState.timeframe })
+    .from(symbolScanState);
+  const existingKeys = new Set(existingRows.map((r) => `${r.symbol}:${r.timeframe}`));
+
+  // Build set of all symbols in the new universe
+  const universeSymbols = new Set(assets.map((a) => a.symbol));
+
+  // 2. Insert new symbols with staggered nextScanDue
+  const newInserts: Array<{ symbol: string; timeframe: string }> = [];
+  for (const asset of assets) {
+    for (const tf of ["1D", "4H"] as const) {
+      const key = `${asset.symbol}:${tf}`;
+      if (!existingKeys.has(key)) {
+        newInserts.push({ symbol: asset.symbol, timeframe: tf });
+      }
+    }
+  }
+
+  const now = Date.now();
+  let seeded = 0;
+
+  // Batch inserts for performance (chunks of 50)
+  for (let i = 0; i < newInserts.length; i++) {
+    const { symbol, timeframe } = newInserts[i];
+    const intervalMs = getScanIntervalMs("NO_PATTERN", timeframe);
+    // Stagger: spread evenly across the interval window
+    const staggerMs = Math.floor((i / Math.max(newInserts.length, 1)) * intervalMs);
+    const nextScanDue = new Date(now + staggerMs);
+
+    try {
+      await db.insert(symbolScanState).values({
+        symbol,
+        timeframe,
+        phase: "NO_PATTERN",
+        lastScannedAt: new Date(0), // epoch — never scanned
+        nextScanDue,
+        scanIntervalMs: intervalMs,
+        pivotCount: 0,
+        updatedAt: new Date(now),
+      }).onConflictDoNothing();
+      seeded++;
+    } catch (err) {
+      // Non-fatal: skip individual insert failures
+      console.error(`[Scheduler] Failed to seed ${symbol} ${timeframe}:`, err);
+    }
+  }
+
+  // 3. Pause delisted symbols (push nextScanDue 30 days out)
+  const PAUSE_MS = 30 * 24 * 60 * 60 * 1000;
+  const pauseDate = new Date(now + PAUSE_MS);
+  let removed = 0;
+
+  // Find existing symbols not in the new universe
+  const existingSymbolSet = new Set(existingRows.map((r) => r.symbol));
+  for (const existingSym of existingSymbolSet) {
+    if (!universeSymbols.has(existingSym)) {
+      try {
+        await db
+          .update(symbolScanState)
+          .set({ nextScanDue: pauseDate, updatedAt: new Date(now) })
+          .where(sql`${symbolScanState.symbol} = ${existingSym}`);
+        removed++;
+        console.log(`[Scheduler] Delisted symbol paused: ${existingSym}`);
+      } catch (err) {
+        console.error(`[Scheduler] Failed to pause delisted symbol ${existingSym}:`, err);
+      }
+    }
+  }
+
+  const existing = existingKeys.size - (removed * 2); // approximate existing (both timeframes)
+
+  if (seeded > 0) {
+    console.log(`[Scheduler] Universe seeded: ${seeded} new scan_state rows, ${newInserts.length} symbol×timeframe combos`);
+  }
+
+  return { seeded, existing: Math.max(0, existing), removed };
 }
 
 // ============================================================
