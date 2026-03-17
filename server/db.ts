@@ -81,6 +81,9 @@ export async function ensureTablesExist(): Promise<void> {
     await db.execute(sql.raw(
       `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS realized_pnl NUMERIC(20,10)`
     ));
+    await db.execute(sql.raw(
+      `ALTER TABLE live_signals ADD COLUMN IF NOT EXISTS score REAL`
+    ));
     console.log("[DB] Table live_signals: OK");
 
     await db.execute(sql`
