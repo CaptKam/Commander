@@ -6,7 +6,7 @@
 import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings, symbolScanState } from "../shared/schema";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
@@ -862,6 +862,71 @@ router.get("/pipeline", (_req, res) => {
       : null,
     websocket: getStreamStatus(),
   });
+});
+
+/**
+ * GET /api/diagnostics/equity — One-shot diagnostic for equity signal verification.
+ * Returns equity signals, equity shorts, scan states, and summary counts.
+ */
+router.get("/diagnostics/equity", async (_req, res) => {
+  try {
+    // Query 1: All equity signals (most recent 20)
+    const equitySignals = await db.execute(sql`
+      SELECT symbol, pattern_type, direction, timeframe, status, entry_price, entry_order_id, created_at
+      FROM live_signals
+      WHERE symbol NOT LIKE '%/%'
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+
+    // Query 2: Equity SHORT signals
+    const equityShorts = await db.execute(sql`
+      SELECT symbol, pattern_type, direction, timeframe, status, entry_price, entry_order_id, created_at
+      FROM live_signals
+      WHERE symbol NOT LIKE '%/%' AND direction = 'short'
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+
+    // Query 3: Equity scan states ordered by phase priority
+    const equityScanStates = await db.execute(sql`
+      SELECT symbol, timeframe, phase, best_pattern, best_direction, projected_d, distance_to_d_pct, last_scanned_at, next_scan_due
+      FROM symbol_scan_state
+      WHERE symbol NOT LIKE '%/%'
+      ORDER BY
+        CASE phase
+          WHEN 'D_APPROACHING' THEN 1
+          WHEN 'CD_PROJECTED' THEN 2
+          WHEN 'BC_FORMING' THEN 3
+          WHEN 'AB_FORMING' THEN 4
+          WHEN 'XA_FORMING' THEN 5
+          ELSE 6
+        END,
+        next_scan_due ASC
+    `);
+
+    // Query 4: Signal summary by asset class + direction + status
+    const summary = await db.execute(sql`
+      SELECT
+        CASE WHEN symbol LIKE '%/%' THEN 'crypto' ELSE 'equity' END as asset_class,
+        direction,
+        status,
+        COUNT(*) as count
+      FROM live_signals
+      GROUP BY 1, 2, 3
+      ORDER BY 1, 2, 3
+    `);
+
+    res.json({
+      equitySignals: equitySignals.rows,
+      equityShorts: equityShorts.rows,
+      equityScanStates: equityScanStates.rows,
+      signalSummary: summary.rows,
+    });
+  } catch (err) {
+    console.error("[API] Equity diagnostics failed:", err);
+    res.status(500).json({ error: "Diagnostics query failed" });
+  }
 });
 
 /**
