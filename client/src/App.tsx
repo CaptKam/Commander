@@ -200,6 +200,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
+  const [bottomTab, setBottomTab] = useState<"feed" | "pipeline" | "scanner">("feed");
 
   const fetchAll = useCallback(async () => {
     try {
@@ -520,44 +521,79 @@ export default function App() {
             </div>
           </div>
 
-          {/* SCAN PIPELINE + LIVE FEED */}
-          <div className="shrink-0 flex flex-col overflow-y-auto" style={{ height: "40%" }}>
-            <ScanPipeline data={pipeline} />
-            <ScanStateView data={scanState} />
-            <div className="shrink-0 flex items-center justify-between px-3 h-7 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-              <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
-                Live Feed
-              </span>
-              <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{feed.length} events</span>
-            </div>
-            <div className="flex-1 overflow-y-auto px-3 py-1">
-              {feed.map((e, i) => (
-                <div key={i} className="flex items-start gap-2 py-0.5 leading-tight">
-                  <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
-                    {ts(e.time)}
-                  </span>
-                  <span
-                    className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
-                    style={{
-                      background: e.tag === "FILL" ? "var(--accent-green-dim)"
-                        : e.tag === "REJECT" ? "var(--accent-red-dim)"
-                        : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
-                        : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
-                        : "rgba(205,166,97,0.15)",
-                      color: e.tag === "FILL" ? "var(--accent-green)"
-                        : e.tag === "REJECT" ? "var(--accent-red)"
-                        : e.tag === "NEAR" ? "var(--accent-amber)"
-                        : e.tag === "CLOSED" ? "var(--text-muted)"
-                        : "var(--accent-amber)",
-                    }}
-                  >
-                    {e.tag}
-                  </span>
-                  <span style={{ color: e.color }}>{e.text}</span>
-                </div>
+          {/* BOTTOM PANEL — tabbed: Feed | Pipeline | Scanner */}
+          <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
+            {/* Tab bar */}
+            <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+              {([
+                { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
+                { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
+                { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
+              ]).map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setBottomTab(tab.key)}
+                  className="flex items-center gap-1.5 px-3 h-7 text-[9px] uppercase tracking-widest font-semibold border-b-2"
+                  style={{
+                    borderColor: bottomTab === tab.key ? "var(--accent-green)" : "transparent",
+                    color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
+                    background: "transparent",
+                  }}
+                >
+                  {tab.label}
+                  {tab.badge && (
+                    <span className="text-[8px] px-1 py-px rounded" style={{
+                      background: bottomTab === tab.key ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
+                      color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
+                    }}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
               ))}
-              {feed.length === 0 && (
-                <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-y-auto">
+              {bottomTab === "feed" && (
+                <div className="px-3 py-1">
+                  {feed.map((e, i) => (
+                    <div key={i} className="flex items-start gap-2 py-0.5 leading-tight">
+                      <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                        {ts(e.time)}
+                      </span>
+                      <span
+                        className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
+                        style={{
+                          background: e.tag === "FILL" ? "var(--accent-green-dim)"
+                            : e.tag === "REJECT" ? "var(--accent-red-dim)"
+                            : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
+                            : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
+                            : "rgba(205,166,97,0.15)",
+                          color: e.tag === "FILL" ? "var(--accent-green)"
+                            : e.tag === "REJECT" ? "var(--accent-red)"
+                            : e.tag === "NEAR" ? "var(--accent-amber)"
+                            : e.tag === "CLOSED" ? "var(--text-muted)"
+                            : "var(--accent-amber)",
+                        }}
+                      >
+                        {e.tag}
+                      </span>
+                      <span style={{ color: e.color }}>{e.text}</span>
+                    </div>
+                  ))}
+                  {feed.length === 0 && (
+                    <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
+                  )}
+                </div>
+              )}
+
+              {bottomTab === "pipeline" && (
+                <ScanPipeline data={pipeline} />
+              )}
+
+              {bottomTab === "scanner" && (
+                <ScanStateView data={scanState} />
               )}
             </div>
           </div>
@@ -700,8 +736,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
 
   if (!data) {
     return (
-      <div className="rounded-md border p-6 text-center mb-6"
-        style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
+      <div className="p-6 text-center">
         <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
           Waiting for first scan cycle...
         </span>
@@ -900,15 +935,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
     },
   ];
   return (
-    <div className="rounded-md border mb-4 mx-3 mt-2" style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
-      <div className="px-4 py-3 border-b flex justify-between items-center" style={{ borderColor: "var(--border-color)" }}>
-        <h3 className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
-          Scan pipeline
-        </h3>
-        <span className="text-[10px]" style={{ color: "var(--accent-green)", fontFamily: "'JetBrains Mono', monospace" }}>
-          {data.lastUpdatedAgo !== null ? `Updated ${data.lastUpdatedAgo}s ago` : "Waiting..."}
-        </span>
-      </div>
+    <div style={{ background: "var(--bg-panel)" }}>
       <div className="p-4">
         {steps.map((step, i) => (
           <div key={step.num} className="flex gap-3" style={{ paddingBottom: i < steps.length - 1 ? 4 : 0 }}>
@@ -1002,15 +1029,7 @@ function ScanStateView({ data }: { data: ScanStateData | null }) {
   const phases = PHASE_ORDER.filter(p => (data.byPhase[p] ?? 0) > 0);
 
   return (
-    <div className="rounded-md border mb-4 mx-3" style={{ background: "var(--bg-panel)", borderColor: "var(--border-color)" }}>
-      <div className="px-4 py-3 border-b flex justify-between items-center" style={{ borderColor: "var(--border-color)" }}>
-        <h3 className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
-          Scanner state
-        </h3>
-        <span className="text-[10px]" style={{ color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>
-          {data.total} tracked · {data.dueNow} due · {data.hotSymbols.length} hot
-        </span>
-      </div>
+    <div style={{ background: "var(--bg-panel)" }}>
       <div className="px-4 py-3">
         {/* Phase distribution bar */}
         <div className="flex rounded overflow-hidden h-3 mb-2" style={{ background: "var(--bg-main)" }}>

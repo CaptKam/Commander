@@ -8,6 +8,7 @@ import {
   boolean,
   jsonb,
   integer,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -108,7 +109,7 @@ export type SystemSettings = typeof systemSettings.$inferSelect;
 
 // ============================================================
 // Symbol Scan State — Tiered scanner scheduling per symbol+timeframe
-// Unique constraint on (symbol, timeframe) enforced via DB index in db.ts
+// Unique constraint on (symbol, timeframe) via uniqueIndex below
 // ============================================================
 export const symbolScanState = pgTable("symbol_scan_state", {
   id: serial("id").primaryKey(),
@@ -132,7 +133,9 @@ export const symbolScanState = pgTable("symbol_scan_state", {
   // Metadata
   pivotCount: integer("pivot_count").notNull().default(0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("symbol_scan_state_symbol_timeframe_idx").on(table.symbol, table.timeframe),
+]);
 
 export type SymbolScanState = typeof symbolScanState.$inferSelect;
 export type InsertSymbolScanState = typeof symbolScanState.$inferInsert;

@@ -174,6 +174,16 @@ export async function ensureTablesExist(): Promise<void> {
         UNIQUE(symbol, timeframe)
       )
     `);
+    // Remove duplicate rows before adding unique constraint (keeps lowest id per symbol+timeframe)
+    await db.execute(sql`
+      DELETE FROM symbol_scan_state a USING symbol_scan_state b
+      WHERE a.id > b.id AND a.symbol = b.symbol AND a.timeframe = b.timeframe
+    `);
+    // Ensure unique constraint exists for existing deployments where CREATE TABLE was a no-op
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS symbol_scan_state_symbol_timeframe_idx
+      ON symbol_scan_state(symbol, timeframe)
+    `);
     console.log("[DB] Table symbol_scan_state: OK");
   } catch (err) {
     console.error("[DB] Failed to ensure tables exist:", err);
