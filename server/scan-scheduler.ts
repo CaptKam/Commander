@@ -137,6 +137,19 @@ export async function getSymbolsDueForScan(): Promise<ScanJob[]> {
     return pb - pa; // Higher priority first
   });
 
+  // ---- 4. Cap per-cycle to avoid overwhelming Alpaca API ----
+  // 150 symbols × ~3 calls each = ~450 calls per 30s cycle
+  // 2 cycles/min = ~900 calls/min — within 1000 limit with headroom
+  // Hot symbols (D_APPROACHING, CD_PROJECTED) always get slots first due to sort above
+  const MAX_JOBS_PER_CYCLE = 150;
+  if (jobs.length > MAX_JOBS_PER_CYCLE) {
+    const deferred = jobs.length - MAX_JOBS_PER_CYCLE;
+    console.log(
+      `[Scheduler] Capped: ${MAX_JOBS_PER_CYCLE} of ${jobs.length} due jobs selected (${deferred} deferred to next cycle)`,
+    );
+    return jobs.slice(0, MAX_JOBS_PER_CYCLE);
+  }
+
   return jobs;
 }
 
