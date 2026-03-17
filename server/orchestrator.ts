@@ -99,16 +99,18 @@ async function getSettings(): Promise<BotSettings> {
 }
 
 // ============================================================
-// Market hours — skip equity symbols when US stock market is closed
-// Crypto scans 24/7 regardless.
+// Market hours — controls ORDER PLACEMENT for equities only.
+// Pattern scanning runs 24/7 for all symbols (crypto + equities).
+// SIP WebSocket still only connects during market hours.
 // ============================================================
 function getEasternTime(): Date {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
 }
 
 /**
- * Returns true if within the extended stock scanning window:
+ * Returns true if within the extended stock trading window:
  * Mon-Fri 9:00 AM – 4:30 PM Eastern (30-min buffer each side of 9:30–4:00).
+ * Used to gate equity ORDER PLACEMENT only — scanning runs 24/7.
  */
 export function isStockMarketOpen(): boolean {
   const eastern = getEasternTime();
@@ -121,25 +123,6 @@ export function isStockMarketOpen(): boolean {
 
   return true;
 }
-
-/**
- * Returns true once per trading day during the 4:30–5:00 PM window.
- * Used to trigger a final daily-candle scan for stocks after close.
- */
-function isPostCloseWindow(): boolean {
-  const eastern = getEasternTime();
-  const day = eastern.getDay();
-  if (day === 0 || day === 6) return false;
-
-  const timeInMinutes = eastern.getHours() * 60 + eastern.getMinutes();
-  // 4:30 PM = 990, 5:00 PM = 1020
-  return timeInMinutes >= 990 && timeInMinutes <= 1020;
-}
-
-// Track daily stock scan: stores the date string (YYYY-MM-DD) of the last
-// completed post-close daily scan so we only do it once per day.
-// Resets naturally each calendar day. Ephemeral — not trade state.
-let lastDailyStockScanDate: string | null = null;
 
 // ============================================================
 // State lock — prevents overlapping scans (CLAUDE.md Rule #2)
@@ -308,44 +291,26 @@ async function runScanCycle(): Promise<void> {
     // ============================================================
     const activeSymbols = await getActiveWatchlist();
     const marketOpen = isStockMarketOpen();
-    const postClose = isPostCloseWindow();
-    const todayDate = getEasternTime().toISOString().slice(0, 10);
-    const dailyScanDone = lastDailyStockScanDate === todayDate;
-    const includeEquities = marketOpen || (postClose && !dailyScanDone);
-
-    const cryptoSymbols = activeSymbols.filter((s) => s.includes("/"));
-    const equitySymbols = activeSymbols.filter((s) => !s.includes("/"));
 
     let usedScheduler = false;
     let filteredJobs: Array<{ symbol: string; timeframe: "1D" | "4H"; currentPhase: string }> = [];
 
     try {
-      const scanJobs = await getSymbolsDueForScan();
-
-      // Apply market hours filter: remove equity jobs if market is closed
-      filteredJobs = scanJobs.filter(job => {
-        if (job.symbol.includes("/")) return true; // crypto always scans
-        return includeEquities;
-      });
+      // All symbols scan 24/7 for pattern detection
+      // Market hours only restrict ORDER PLACEMENT (handled in execution loop)
+      filteredJobs = await getSymbolsDueForScan();
       usedScheduler = true;
     } catch (err) {
       console.error("[Orchestrator] Scheduler failed, falling back to full watchlist:", err);
     }
 
-    // Fallback: if scheduler failed, build jobs from full watchlist (old behavior)
+    // Fallback: if scheduler failed, build jobs from full watchlist
     if (!usedScheduler) {
-      const symbolsToScan = includeEquities ? activeSymbols : cryptoSymbols;
-      for (const symbol of symbolsToScan) {
+      for (const symbol of activeSymbols) {
         for (const tf of TIMEFRAMES) {
           filteredJobs.push({ symbol, timeframe: tf, currentPhase: "UNKNOWN" });
         }
       }
-    }
-
-    if (!marketOpen && postClose && !dailyScanDone) {
-      console.log(
-        `[Orchestrator] Market CLOSED — post-close daily scan for ${equitySymbols.length} equities`,
-      );
     }
 
     // Pipeline stats: Step 1 — what we're scanning
@@ -372,8 +337,9 @@ async function runScanCycle(): Promise<void> {
       return;
     }
 
+    const marketStatus = marketOpen ? "OPEN" : "CLOSED";
     console.log(
-      `[Orchestrator] Scan #${scanCount}: ${filteredJobs.length} jobs due ` +
+      `[Orchestrator] Scan #${scanCount}: Market ${marketStatus} — ${filteredJobs.length} jobs due ` +
       `(${filteredJobs.filter(j => j.currentPhase === "D_APPROACHING").length} approaching D, ` +
       `${filteredJobs.filter(j => j.currentPhase === "CD_PROJECTED").length} projected, ` +
       `${filteredJobs.filter(j => ["NO_PATTERN","XA_FORMING","AB_FORMING"].includes(j.currentPhase)).length} cold)`,
@@ -403,12 +369,6 @@ async function runScanCycle(): Promise<void> {
         if (!allCandleData.has(symbol)) allCandleData.set(symbol, []);
         allCandleData.get(symbol)!.push({ candles, timeframe: tf });
       }
-    }
-
-    // Mark daily stock scan as done if we just ran the post-close scan
-    if (!marketOpen && postClose && !dailyScanDone && includeEquities) {
-      lastDailyStockScanDate = todayDate;
-      console.log(`[Orchestrator] Post-close daily stock scan complete for ${todayDate}`);
     }
 
     // ============================================================
@@ -618,6 +578,13 @@ async function runScanCycle(): Promise<void> {
         } else if (!settings.tradingEnabled) {
           console.log(
             `[Orchestrator] Trading PAUSED — signal saved but order skipped for ${signal.symbol}`,
+          );
+          try { pipelineStats.ordersSkipped++; } catch {}
+        } else if (!isCrypto && !isStockMarketOpen()) {
+          // Equity signal detected outside market hours — save but don't place order
+          // Leave status as "pending" — exit-manager won't touch it since there's no entryOrderId
+          console.log(
+            `[Orchestrator] Equity signal saved, order deferred until market open: ${signal.symbol} ${signal.pattern} ${signal.direction}`,
           );
           try { pipelineStats.ordersSkipped++; } catch {}
         } else if (equity !== null) {
