@@ -690,34 +690,11 @@ async function runScanCycle(): Promise<void> {
       }
     }
 
-    // Save outranked signals for analysis (status = "outranked", no Alpaca order)
-    for (const scored of outranked) {
-      const signal = scored.signal;
-
-      // Skip if already in DB (dedup still applies)
-      if (isSignalAlreadySent(signal)) continue;
-
-      try {
-        const parsed = insertLiveSignalSchema.parse({
-          symbol: signal.symbol,
-          patternType: signal.pattern,
-          timeframe: signal.timeframe,
-          direction: signal.direction,
-          entryPrice: String(signal.limitPrice),
-          stopLossPrice: String(signal.stopLossPrice),
-          tp1Price: String(signal.tp1Price),
-          tp2Price: String(signal.tp2Price),
-          xPrice: String(signal.xPrice),
-          aPrice: String(signal.aPrice),
-          bPrice: String(signal.bPrice),
-          cPrice: String(signal.cPrice),
-        });
-
-        await db.insert(liveSignals).values({ ...parsed, status: "outranked", score: scored.score });
-        markSignalSent(signal);
-      } catch {
-        // Silent — outranked signal logging is best-effort
-      }
+    // Log outranked signals but don't persist to DB (reduces writes by ~60%)
+    // Previously saved all outranked to live_signals — 1,693+ rows of diagnostic data
+    // that was rarely referenced and consumed significant Neon transfer budget.
+    if (outranked.length > 0) {
+      console.log(`[Orchestrator] ${outranked.length} outranked signals (not persisted): ${outranked.map((s) => `${s.signal.symbol}/${s.signal.pattern}`).join(", ")}`);
     }
 
     // ============================================================
@@ -954,22 +931,24 @@ async function runScanCycle(): Promise<void> {
       console.error("[Orchestrator] Projected promotion check failed:", err);
     }
 
-    // ---- Pipeline stats: final status counts from DB ----
-    try {
-      pipelineStats.exitCycleRan = true;
-      const allActive = await db
-        .select({ status: liveSignals.status })
-        .from(liveSignals)
-        .where(inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "paper_only", "projected"]));
-      pipelineStats.pendingFills = allActive.filter((r) => r.status === "pending" || r.status === "paper_only").length;
-      pipelineStats.filledPositions = allActive.filter((r) => r.status === "filled").length;
-      pipelineStats.partialExits = allActive.filter((r) => r.status === "partial_exit").length;
-      pipelineStats.closedTrades = allActive.filter((r) => r.status === "closed").length;
-      pipelineStats.projectedCount = allActive.filter((r) => r.status === "projected").length;
-      pipelineStats.lastUpdated = Date.now();
-    } catch (err) {
-      console.error("[Orchestrator] Pipeline stats query failed (non-fatal):", err);
-      pipelineStats.lastUpdated = Date.now();
+    // ---- Pipeline stats: final status counts from DB (every 5th cycle to reduce DB load) ----
+    if (scanCount % 5 === 0) {
+      try {
+        pipelineStats.exitCycleRan = true;
+        const allActive = await db
+          .select({ status: liveSignals.status })
+          .from(liveSignals)
+          .where(inArray(liveSignals.status, ["pending", "filled", "partial_exit", "closed", "paper_only", "projected"]));
+        pipelineStats.pendingFills = allActive.filter((r) => r.status === "pending" || r.status === "paper_only").length;
+        pipelineStats.filledPositions = allActive.filter((r) => r.status === "filled").length;
+        pipelineStats.partialExits = allActive.filter((r) => r.status === "partial_exit").length;
+        pipelineStats.closedTrades = allActive.filter((r) => r.status === "closed").length;
+        pipelineStats.projectedCount = allActive.filter((r) => r.status === "projected").length;
+        pipelineStats.lastUpdated = Date.now();
+      } catch (err) {
+        console.error("[Orchestrator] Pipeline stats query failed (non-fatal):", err);
+        pipelineStats.lastUpdated = Date.now();
+      }
     }
 
     // ALWAYS release the lock, even if the scan threw

@@ -198,7 +198,9 @@ interface WatchlistItem {
 // ============================================================
 // Constants & helpers
 // ============================================================
-const POLL_INTERVAL = 10_000;
+const POLL_FAST = 15_000;    // 15s — account, positions (real-time during trading)
+const POLL_MEDIUM = 30_000;  // 30s — signals, approaching, pipeline
+const POLL_SLOW = 120_000;   // 2min — settings, watchlist, history, metrics, scan-state
 const MONO = "'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, monospace";
 const DISPLAY = "'Inter', 'SF Pro Display', system-ui, sans-serif";
 
@@ -258,40 +260,63 @@ export default function App() {
     setActivePage("trade");
   }, []);
 
-  const fetchAll = useCallback(async () => {
+  // Fast tier: account + positions (need real-time during trading)
+  const fetchFast = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes, pipeRes, ssRes, spRes] =
-        await Promise.allSettled([
-          fetch("/api/account").then((r) => r.json()),
-          fetch("/api/positions").then((r) => r.json()),
-          fetch("/api/signals").then((r) => r.json()),
-          fetch("/api/status").then((r) => r.json()),
-          fetch("/api/metrics").then((r) => r.json()),
-          fetch("/api/approaching").then((r) => r.json()),
-          fetch("/api/settings").then((r) => r.json()),
-          fetch("/api/history").then((r) => r.json()),
-          fetch("/api/watchlist").then((r) => r.json()),
-          fetch("/api/pipeline").then((r) => r.json()),
-          fetch("/api/scan-state").then((r) => r.json()),
-          fetch("/api/signals/pipeline").then((r) => r.json()),
-        ]);
+      const [acctRes, posRes] = await Promise.allSettled([
+        fetch("/api/account").then((r) => r.json()),
+        fetch("/api/positions").then((r) => r.json()),
+      ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value)) setPositions(posRes.value);
+    } catch {}
+  }, []);
+
+  // Medium tier: signals, approaching, pipeline, status
+  const fetchMedium = useCallback(async () => {
+    try {
+      const [sigRes, appRes, pipeRes, statRes, spRes] = await Promise.allSettled([
+        fetch("/api/signals").then((r) => r.json()),
+        fetch("/api/approaching").then((r) => r.json()),
+        fetch("/api/pipeline").then((r) => r.json()),
+        fetch("/api/status").then((r) => r.json()),
+        fetch("/api/signals/pipeline").then((r) => r.json()),
+      ]);
       if (sigRes.status === "fulfilled" && Array.isArray(sigRes.value)) setSignals(sigRes.value);
-      if (statRes.status === "fulfilled") setStatus(statRes.value);
-      if (metRes.status === "fulfilled") setMetrics(metRes.value);
       if (appRes.status === "fulfilled" && Array.isArray(appRes.value)) setApproaching(appRes.value);
+      if (pipeRes.status === "fulfilled") setPipeline(pipeRes.value);
+      if (statRes.status === "fulfilled") setStatus(statRes.value);
+      if (spRes.status === "fulfilled") setSignalPipeline(spRes.value);
+    } catch {}
+  }, []);
+
+  // Slow tier: settings, watchlist, history, metrics, scan-state
+  const fetchSlow = useCallback(async () => {
+    try {
+      const [metRes, setRes, histRes, wlRes, ssRes] = await Promise.allSettled([
+        fetch("/api/metrics").then((r) => r.json()),
+        fetch("/api/settings").then((r) => r.json()),
+        fetch("/api/history").then((r) => r.json()),
+        fetch("/api/watchlist").then((r) => r.json()),
+        fetch("/api/scan-state").then((r) => r.json()),
+      ]);
+      if (metRes.status === "fulfilled") setMetrics(metRes.value);
       if (setRes.status === "fulfilled" && setRes.value && !setRes.value.error) setBotSettings(setRes.value);
       if (histRes.status === "fulfilled" && Array.isArray(histRes.value)) setHistory(histRes.value);
       if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value)) setWatchlist(wlRes.value);
-      if (pipeRes.status === "fulfilled") setPipeline(pipeRes.value);
       if (ssRes.status === "fulfilled") setScanState(ssRes.value);
-      if (spRes.status === "fulfilled") setSignalPipeline(spRes.value);
+    } catch {}
+  }, []);
+
+  // Combined fetch for initial load
+  const fetchAll = useCallback(async () => {
+    try {
+      await Promise.all([fetchFast(), fetchMedium(), fetchSlow()]);
     } catch {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchFast, fetchMedium, fetchSlow]);
 
   const updateSettings = useCallback(async (patch: Partial<BotSettings>) => {
     try {
@@ -305,10 +330,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    fetchAll();
-    const id = setInterval(fetchAll, POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [fetchAll]);
+    fetchAll(); // Initial load — everything at once
+    const fastId = setInterval(fetchFast, POLL_FAST);
+    const mediumId = setInterval(fetchMedium, POLL_MEDIUM);
+    const slowId = setInterval(fetchSlow, POLL_SLOW);
+    return () => {
+      clearInterval(fastId);
+      clearInterval(mediumId);
+      clearInterval(slowId);
+    };
+  }, [fetchAll, fetchFast, fetchMedium, fetchSlow]);
 
   // ---- Derived ----
   const equity = account?.equity ?? 0;
