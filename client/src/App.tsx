@@ -955,15 +955,14 @@ function SymbolWatchboard({
     }
 
     const result: WatchboardSymbol[] = [];
-    const seen = new Set<string>();
+    const bestBySymbol = new Map<string, WatchboardSymbol>();
 
     for (const ap of approaching) {
       const compKey = `${ap.symbol}:${ap.timeframe}:${ap.pattern}`;
-      seen.add(compKey);
       const sp = spMap.get(compKey);
       const hasPos = positionSymbols.has(ap.symbol);
       const { phase, description, phaseKey } = getPhaseFromSignal(ap, sp, hasPos);
-      result.push({
+      const item: WatchboardSymbol = {
         symbol: ap.symbol,
         pattern: ap.pattern,
         direction: ap.direction,
@@ -981,18 +980,21 @@ function SymbolWatchboard({
         hasOrder: ap.hasOrder ?? false,
         blocked: ap.blocked ?? null,
         createdAt: ap.createdAt,
-      });
+      };
+      const existing = bestBySymbol.get(ap.symbol);
+      if (!existing || (item.hasOrder && !existing.hasOrder) || (item.distancePct ?? 999) < (existing.distancePct ?? 999)) {
+        bestBySymbol.set(ap.symbol, item);
+      }
     }
 
     if (signalPipeline) {
       for (const sp of signalPipeline.signals) {
-        const compKey = `${sp.symbol}:${sp.timeframe}:${sp.pattern}`;
-        if (seen.has(compKey)) continue;
+        if (bestBySymbol.has(sp.symbol)) continue;
         if (sp.stage === "Expired" || sp.stage === "Dismissed" || sp.stage === "Outranked") continue;
-        seen.add(compKey);
+        if (bestBySymbol.has(sp.symbol)) continue;
         const hasPos = positionSymbols.has(sp.symbol);
         const { phase, description, phaseKey } = getPhaseFromSignal(undefined, sp, hasPos);
-        result.push({
+        bestBySymbol.set(sp.symbol, {
           symbol: sp.symbol,
           pattern: sp.pattern,
           direction: sp.direction,
@@ -1013,6 +1015,8 @@ function SymbolWatchboard({
         });
       }
     }
+
+    for (const item of bestBySymbol.values()) result.push(item);
 
     const counts: Record<string, number> = {};
     for (const it of result) counts[it.phaseKey] = (counts[it.phaseKey] ?? 0) + 1;
