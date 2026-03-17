@@ -206,9 +206,44 @@ function appendBars(
 }
 
 // ============================================================
+// Batch chunking — split large symbol lists to avoid pagination
+// truncation. 5 symbols × ~360 candles = ~1,800 bars per chunk,
+// well within 1–2 pages of Alpaca's 10,000-bar page limit.
+// ============================================================
+const CHUNK_SIZE = 5;
+
+function chunkArray(arr: string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < arr.length; i += CHUNK_SIZE) {
+    chunks.push(arr.slice(i, i + CHUNK_SIZE));
+  }
+  return chunks;
+}
+
+// ============================================================
 // Stock bars fetcher (batched + paginated)
 // ============================================================
 async function fetchStockBars(
+  symbols: string[],
+  timeframe: "1D" | "4H",
+  key: string,
+  secret: string,
+): Promise<Map<string, Candle[]>> {
+  const results = new Map<string, Candle[]>();
+  if (symbols.length === 0) return results;
+
+  const chunks = chunkArray(symbols);
+  for (const chunk of chunks) {
+    const chunkResult = await fetchStockBarsChunk(chunk, timeframe, key, secret);
+    for (const [sym, candles] of chunkResult) {
+      results.set(sym, candles);
+    }
+  }
+
+  return results;
+}
+
+async function fetchStockBarsChunk(
   symbols: string[],
   timeframe: "1D" | "4H",
   key: string,
@@ -297,6 +332,26 @@ async function fetchStockBars(
 // Crypto bars fetcher (batched + paginated)
 // ============================================================
 async function fetchCryptoBars(
+  symbols: string[],
+  timeframe: "1D" | "4H",
+  key: string,
+  secret: string,
+): Promise<Map<string, Candle[]>> {
+  const results = new Map<string, Candle[]>();
+  if (symbols.length === 0) return results;
+
+  const chunks = chunkArray(symbols);
+  for (const chunk of chunks) {
+    const chunkResult = await fetchCryptoBarsChunk(chunk, timeframe, key, secret);
+    for (const [sym, candles] of chunkResult) {
+      results.set(sym, candles);
+    }
+  }
+
+  return results;
+}
+
+async function fetchCryptoBarsChunk(
   symbols: string[],
   timeframe: "1D" | "4H",
   key: string,
