@@ -84,6 +84,10 @@ interface ApproachingSignal {
   c: number | null;
   distancePct: number;
   createdAt: string;
+  hasOrder?: boolean;
+  blocked?: string | null;
+  paperOnly?: boolean;
+  rr?: number | null;
 }
 
 interface BotSettings {
@@ -282,15 +286,13 @@ export default function App() {
     });
 
     approaching.forEach((s) => {
-      const isCrypto = s.symbol.includes("/");
-      const blocked = isCrypto && s.direction === "short";
+      const label = `${s.direction.toUpperCase()} ${s.symbol} ${s.pattern} ${s.timeframe} — ${s.distancePct.toFixed(1)}% from D @ ${fmt(s.projectedD)}`;
+      const suffix = s.paperOnly ? " (paper)" : "";
       events.push({
         time: s.createdAt,
-        tag: blocked ? "REJECT" : "NEAR",
-        color: blocked ? "var(--accent-red)" : s.distancePct < 2 ? "var(--accent-amber)" : "var(--text-main)",
-        text: blocked
-          ? `${s.symbol} ${s.pattern} SHORT blocked — crypto shorts unsupported`
-          : `${s.direction.toUpperCase()} ${s.symbol} ${s.pattern} ${s.timeframe} — ${s.distancePct.toFixed(1)}% from D @ ${fmt(s.projectedD)}`,
+        tag: "NEAR",
+        color: s.distancePct < 2 ? "var(--accent-amber)" : "var(--text-main)",
+        text: label + suffix,
       });
     });
 
@@ -643,10 +645,7 @@ export default function App() {
             <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
               Imminent ({approaching.filter((s) => s.distancePct <= 5).length})
             </div>
-            {approaching.filter((s) => s.distancePct <= 5).slice(0, 8).map((s) => {
-              const isCrypto = s.symbol.includes("/");
-              const blocked = isCrypto && s.direction === "short";
-              return (
+            {approaching.filter((s) => s.distancePct <= 5).slice(0, 8).map((s) => (
                 <div key={s.id} className="flex items-center justify-between py-1">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span
@@ -659,20 +658,23 @@ export default function App() {
                       {s.direction === "long" ? "L" : "S"}
                     </span>
                     <span className="text-white truncate">{s.symbol}</span>
+                    {s.paperOnly && (
+                      <span className="text-[8px] px-1 py-px rounded shrink-0" style={{
+                        background: "rgba(205,166,97,0.15)",
+                        color: "var(--accent-amber)",
+                      }}>
+                        paper
+                      </span>
+                    )}
                   </div>
-                  {blocked ? (
-                    <span className="text-[9px] shrink-0" style={{ color: "var(--accent-red)" }}>BLOCKED</span>
-                  ) : (
-                    <span
-                      className="text-[9px] shrink-0 font-semibold"
-                      style={{ color: s.distancePct < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
-                    >
-                      {s.distancePct.toFixed(1)}%
-                    </span>
-                  )}
+                  <span
+                    className="text-[9px] shrink-0 font-semibold"
+                    style={{ color: s.distancePct < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
+                  >
+                    {s.distancePct.toFixed(1)}%
+                  </span>
                 </div>
-              );
-            })}
+            ))}
             {approaching.filter((s) => s.distancePct <= 5).length === 0 && (
               <div style={{ color: "var(--text-muted)" }}>None imminent</div>
             )}
