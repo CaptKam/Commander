@@ -190,6 +190,14 @@ export function detectHarmonics(
       continue;
     }
 
+    // ---- Recency filter: reject stale patterns from months ago ----
+    // Point C must be within the last N candles, otherwise the pattern
+    // formed too long ago and projected D is no longer actionable.
+    const MAX_C_AGE = timeframe === "1D" ? 40 : 60; // 40 daily or 60 4H candles
+    if (C.index < candles.length - MAX_C_AGE) {
+      continue;
+    }
+
     // ---- Minimum leg filter: reject micro-noise pivots ----
     const xaSize = Math.abs(X.price - A.price);
     const midPrice = (X.price + A.price) / 2;
