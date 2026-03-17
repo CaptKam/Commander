@@ -485,7 +485,10 @@ async function runScanCycle(): Promise<void> {
       });
     }
 
-    for (const signal of bestSignals) {
+    for (const scored of bestSignals) {
+      const signal = scored.signal;
+      const signalScore = scored.score;
+
       // ---- Layer 1: In-memory cache (fast, survives within process) ----
       if (isSignalAlreadySent(signal)) {
         console.log(
@@ -558,9 +561,9 @@ async function runScanCycle(): Promise<void> {
         });
 
         // ---- Insert into Neon DB (returning ID for exit manager tracking) ----
-        const [inserted] = await db.insert(liveSignals).values(parsed).returning({ id: liveSignals.id });
+        const [inserted] = await db.insert(liveSignals).values({ ...parsed, score: signalScore }).returning({ id: liveSignals.id });
         console.log(
-          `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern} (id=${inserted.id})`,
+          `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern} score=${signalScore.toFixed(1)} (id=${inserted.id})`,
         );
         try { pipelineStats.newSignalsSaved++; } catch {}
 
@@ -654,7 +657,7 @@ async function runScanCycle(): Promise<void> {
           cPrice: String(signal.cPrice),
         });
 
-        await db.insert(liveSignals).values({ ...parsed, status: "outranked" });
+        await db.insert(liveSignals).values({ ...parsed, status: "outranked", score: scored.score });
         markSignalSent(signal);
       } catch {
         // Silent — outranked signal logging is best-effort

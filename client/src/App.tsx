@@ -97,6 +97,36 @@ interface BotSettings {
   enabled_patterns: string[];
 }
 
+interface SignalPipelineEntry {
+  id: number;
+  symbol: string;
+  pattern: string;
+  timeframe: string;
+  direction: string;
+  status: string;
+  stage: string;
+  stageDetail: string;
+  stageColor: string;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  score: number | null;
+  entryOrderId: string | null;
+  hasOrder: boolean;
+  detectedAt: string;
+  filledAt: string | null;
+  blockedReason: string | null;
+}
+
+interface SignalPipelineData {
+  signals: SignalPipelineEntry[];
+  summary: {
+    total: number;
+    byStage: Record<string, number>;
+  };
+}
+
 interface PipelineData {
   lastUpdatedAgo: number | null;
   symbolsScanned: number;
@@ -206,11 +236,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
-  const [bottomTab, setBottomTab] = useState<"feed" | "pipeline" | "scanner">("feed");
+  const [bottomTab, setBottomTab] = useState<"feed" | "pipeline" | "scanner" | "signals">("feed");
+  const [signalPipeline, setSignalPipeline] = useState<SignalPipelineData | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes, pipeRes, ssRes] =
+      const [acctRes, posRes, sigRes, statRes, metRes, appRes, setRes, histRes, wlRes, pipeRes, ssRes, spRes] =
         await Promise.allSettled([
           fetch("/api/account").then((r) => r.json()),
           fetch("/api/positions").then((r) => r.json()),
@@ -223,6 +254,7 @@ export default function App() {
           fetch("/api/watchlist").then((r) => r.json()),
           fetch("/api/pipeline").then((r) => r.json()),
           fetch("/api/scan-state").then((r) => r.json()),
+          fetch("/api/signals/pipeline").then((r) => r.json()),
         ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value)) setPositions(posRes.value);
@@ -235,6 +267,7 @@ export default function App() {
       if (wlRes.status === "fulfilled" && Array.isArray(wlRes.value)) setWatchlist(wlRes.value);
       if (pipeRes.status === "fulfilled") setPipeline(pipeRes.value);
       if (ssRes.status === "fulfilled") setScanState(ssRes.value);
+      if (spRes.status === "fulfilled" && spRes.value?.signals) setSignalPipeline(spRes.value);
     } catch {
     } finally {
       setLoading(false);
@@ -532,6 +565,7 @@ export default function App() {
             <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
               {([
                 { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
+                { key: "signals" as const, label: "Signals", badge: signalPipeline ? String(signalPipeline.summary.total) : undefined },
                 { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
                 { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
               ]).map((tab) => (
@@ -591,6 +625,10 @@ export default function App() {
                     <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
                   )}
                 </div>
+              )}
+
+              {bottomTab === "signals" && (
+                <SignalPipelineView data={signalPipeline} />
               )}
 
               {bottomTab === "pipeline" && (
@@ -739,6 +777,189 @@ export default function App() {
 // ============================================================
 // Scan Pipeline
 // ============================================================
+// ============================================================
+// Signal Pipeline View — lifecycle status of every signal
+// ============================================================
+const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
+  "Detected":      { bg: "rgba(168,85,247,0.15)", fg: "#c084fc" },
+  "Outranked":     { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
+  "Paper Only":    { bg: "rgba(205,166,97,0.15)",  fg: "var(--accent-amber)" },
+  "Market Closed": { bg: "rgba(205,166,97,0.15)",  fg: "var(--accent-amber)" },
+  "Order Placed":  { bg: "rgba(249,115,22,0.15)",  fg: "#fb923c" },
+  "Filled":        { bg: "rgba(59,130,246,0.15)",  fg: "#60a5fa" },
+  "Exiting":       { bg: "rgba(59,130,246,0.15)",  fg: "#60a5fa" },
+  "Closed":        { bg: "rgba(103,194,152,0.15)", fg: "var(--accent-green)" },
+  "Expired":       { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
+  "Dismissed":     { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" },
+};
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
+  if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  if (ms < 86400_000) return `${Math.floor(ms / 3600_000)}h ago`;
+  return `${Math.floor(ms / 86400_000)}d ago`;
+}
+
+function SignalPipelineView({ data }: { data: SignalPipelineData | null }) {
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"time" | "score" | "symbol">("time");
+
+  if (!data) {
+    return (
+      <div className="p-6 text-center">
+        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+          Waiting for signal data...
+        </span>
+      </div>
+    );
+  }
+
+  const stages = [
+    "Detected", "Order Placed", "Filled", "Exiting", "Closed",
+    "Outranked", "Paper Only", "Market Closed", "Expired",
+  ];
+
+  const filtered = stageFilter
+    ? data.signals.filter((s) => s.stage === stageFilter)
+    : data.signals;
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "score") return (b.score ?? 0) - (a.score ?? 0);
+    if (sortBy === "symbol") return a.symbol.localeCompare(b.symbol);
+    return new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime();
+  });
+
+  return (
+    <div style={{ background: "var(--bg-panel)" }}>
+      {/* Summary bar */}
+      <div className="flex items-center gap-1 px-3 py-2 flex-wrap border-b" style={{ borderColor: "var(--border-color)" }}>
+        <button
+          onClick={() => setStageFilter(null)}
+          className="text-[8px] px-1.5 py-0.5 rounded font-semibold uppercase"
+          style={{
+            background: !stageFilter ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
+            color: !stageFilter ? "var(--accent-green)" : "var(--text-muted)",
+            border: "none", cursor: "pointer",
+          }}
+        >
+          All {data.summary.total}
+        </button>
+        {stages.map((stage) => {
+          const count = data.summary.byStage[stage] ?? 0;
+          if (count === 0) return null;
+          const colors = STAGE_COLORS[stage] ?? { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" };
+          return (
+            <button
+              key={stage}
+              onClick={() => setStageFilter(stageFilter === stage ? null : stage)}
+              className="text-[8px] px-1.5 py-0.5 rounded font-semibold"
+              style={{
+                background: stageFilter === stage ? colors.fg + "33" : colors.bg,
+                color: colors.fg,
+                border: stageFilter === stage ? `1px solid ${colors.fg}` : "1px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              {stage} {count}
+            </button>
+          );
+        })}
+        <div className="flex-1" />
+        <div className="flex gap-1">
+          {(["time", "score", "symbol"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSortBy(s)}
+              className="text-[8px] px-1 py-0.5 rounded"
+              style={{
+                background: sortBy === s ? "rgba(255,255,255,0.1)" : "transparent",
+                color: sortBy === s ? "white" : "var(--text-muted)",
+                border: "none", cursor: "pointer",
+              }}
+            >
+              {s === "time" ? "Recent" : s === "score" ? "Score" : "A-Z"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Signal table */}
+      <div className="overflow-y-auto" style={{ maxHeight: "calc(100% - 36px)" }}>
+        <table className="w-full text-[10px]" style={{ fontFamily: MONO }}>
+          <thead>
+            <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border-color)" }}>
+              <th className="text-left px-2 py-1.5 font-semibold">Symbol</th>
+              <th className="text-left px-2 py-1.5 font-semibold">Pattern</th>
+              <th className="text-left px-2 py-1.5 font-semibold">Dir</th>
+              <th className="text-right px-2 py-1.5 font-semibold">Score</th>
+              <th className="text-right px-2 py-1.5 font-semibold">Entry</th>
+              <th className="text-left px-2 py-1.5 font-semibold">Stage</th>
+              <th className="text-left px-2 py-1.5 font-semibold">Detail</th>
+              <th className="text-right px-2 py-1.5 font-semibold">When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((s) => {
+              const colors = STAGE_COLORS[s.stage] ?? { bg: "rgba(255,255,255,0.05)", fg: "var(--text-muted)" };
+              return (
+                <tr
+                  key={s.id}
+                  className="border-b"
+                  style={{ borderColor: "var(--border-color)" }}
+                >
+                  <td className="px-2 py-1.5 font-semibold" style={{ color: "white" }}>{s.symbol}</td>
+                  <td className="px-2 py-1.5" style={{ color: "var(--text-muted)" }}>
+                    {s.pattern} {s.timeframe}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <span
+                      className="text-[8px] px-1 py-px rounded uppercase font-semibold"
+                      style={{
+                        background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                        color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                      }}
+                    >
+                      {s.direction}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 text-right" style={{ color: s.score != null && s.score >= 75 ? "var(--accent-green)" : s.score != null && s.score >= 50 ? "var(--accent-amber)" : "var(--text-muted)" }}>
+                    {s.score != null ? s.score.toFixed(1) : "—"}
+                  </td>
+                  <td className="px-2 py-1.5 text-right" style={{ color: "var(--text-muted)" }}>
+                    {s.entryPrice != null ? fmt(s.entryPrice) : "—"}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <span
+                      className="text-[8px] px-1.5 py-0.5 rounded font-semibold"
+                      style={{ background: colors.bg, color: colors.fg }}
+                    >
+                      {s.stage}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5" style={{ color: "var(--text-muted)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {s.stageDetail}
+                  </td>
+                  <td className="px-2 py-1.5 text-right" style={{ color: "var(--text-muted)" }}>
+                    {relativeTime(s.detectedAt)}
+                  </td>
+                </tr>
+              );
+            })}
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={8} className="py-6 text-center" style={{ color: "var(--text-muted)" }}>
+                  {stageFilter ? `No ${stageFilter} signals` : "No signals in the last 7 days"}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ScanPipeline({ data }: { data: PipelineData | null }) {
   const [openSteps, setOpenSteps] = useState<Set<number>>(new Set([1]));
 
@@ -773,9 +994,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="Market" value={data.marketOpen ? "Open" : "Closed"} color={data.marketOpen ? "var(--accent-green)" : "var(--text-muted)"} />
             <PipeMetric label="Timeframes" value="1D + 4H" sub="Both scanned each cycle" />
           </div>
-          <PipeBullet text={data.marketOpen
-            ? `All ${data.symbolsScanned} symbols scanned (market open)`
-            : `${data.cryptoCount} crypto scanned (equities skipped — market closed)`} />
+          <PipeBullet text={`All ${data.symbolsScanned} symbols scanned 24/7 (${data.cryptoCount} crypto · ${data.equityCount} equity)${!data.marketOpen ? " · Equity orders deferred" : ""}`} />
         </div>
       ),
     },
@@ -791,7 +1010,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="4-Hour candles" value="90 days" sub="Cached 5 minutes" />
           </div>
           <PipeBullet text="Crypto and stocks batched into separate API calls" />
-          <PipeBullet text="Rate limiter: 200 req/min (Alpaca free tier)" />
+          <PipeBullet text="Rate limiter: 1000 req/min (Algo Trader Plus) · 100ms throttle" />
           <PipeBullet text="Paginated up to 15 pages per request" />
         </div>
       ),
