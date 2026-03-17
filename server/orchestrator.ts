@@ -19,6 +19,7 @@ import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
 import { startPriceStreams, stopPriceStreams } from "./websocket-stream";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
+import { selectBestSignals } from "./signal-ranker";
 import { getSymbolsDueForScan, updateScanState, initializeScanStates, getScanStateStats } from "./scan-scheduler";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
@@ -495,6 +496,17 @@ async function runScanCycle(): Promise<void> {
     }
 
     // ============================================================
+    // Step 5.5: Rank signals — pick best pattern per symbol
+    // If AAVE/USD has 7 qualifying patterns, only the highest-scoring
+    // one gets an order. Others are saved as "outranked" for analysis.
+    // ============================================================
+    const { selected: bestSignals, outranked } = selectBestSignals(validSignals);
+
+    console.log(
+      `[Orchestrator] Ranking: ${validSignals.length} valid → ${bestSignals.length} best (${outranked.length} outranked)`,
+    );
+
+    // ============================================================
     // Step 4: Fetch equity, save to DB, execute orders
     // Equity fetch is wrapped in try/catch so a temporary Alpaca
     // outage doesn't kill the scan — signals still get logged.
@@ -513,7 +525,7 @@ async function runScanCycle(): Promise<void> {
       });
     }
 
-    for (const signal of validSignals) {
+    for (const signal of bestSignals) {
       // ---- Layer 1: In-memory cache (fast, survives within process) ----
       if (isSignalAlreadySent(signal)) {
         console.log(
@@ -538,7 +550,7 @@ async function runScanCycle(): Promise<void> {
               eq(liveSignals.timeframe, signal.timeframe),
               eq(liveSignals.patternType, signal.pattern),
               eq(liveSignals.direction, signal.direction),
-              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "paper_only"]),
+              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "paper_only", "outranked"]),
               gte(liveSignals.createdAt, timeWindow),
             ),
           )
@@ -652,10 +664,40 @@ async function runScanCycle(): Promise<void> {
       }
     }
 
+    // Save outranked signals for analysis (status = "outranked", no Alpaca order)
+    for (const scored of outranked) {
+      const signal = scored.signal;
+
+      // Skip if already in DB (dedup still applies)
+      if (isSignalAlreadySent(signal)) continue;
+
+      try {
+        const parsed = insertLiveSignalSchema.parse({
+          symbol: signal.symbol,
+          patternType: signal.pattern,
+          timeframe: signal.timeframe,
+          direction: signal.direction,
+          entryPrice: String(signal.limitPrice),
+          stopLossPrice: String(signal.stopLossPrice),
+          tp1Price: String(signal.tp1Price),
+          tp2Price: String(signal.tp2Price),
+          xPrice: String(signal.xPrice),
+          aPrice: String(signal.aPrice),
+          bPrice: String(signal.bPrice),
+          cPrice: String(signal.cPrice),
+        });
+
+        await db.insert(liveSignals).values({ ...parsed, status: "outranked" });
+        markSignalSent(signal);
+      } catch {
+        // Silent — outranked signal logging is best-effort
+      }
+    }
+
     const elapsed = Date.now() - cycleStart;
     console.log(
       `[Orchestrator] Scan #${scanCount} complete (${elapsed}ms) — ` +
-        `${validSignals.length} signals processed`,
+        `${bestSignals.length} best signals processed (${outranked.length} outranked)`,
     );
   } catch (err) {
     console.error("[Orchestrator] Scan cycle failed:", err);
