@@ -1,0 +1,362 @@
+Follow The Money (FTM) — Complete System Outline
+Overview
+FTM is a multi-agent crypto intelligence platform that tracks Trump family crypto connections, correlates political events with market movements, and generates quantitative trading signals. Five autonomous systems communicate via deployed Replit URLs.
+
+Architecture
+POTUS (Intelligence) → Oracle (Prediction) → Jarvis (Risk Review) → Commander (Execution)
+                              ↑
+                        Atlas (Technical Analysis + Macro Data)
+
+System 1: POTUS — Political Intelligence
+Purpose: Real-time political event detection, entity tracking, knowledge graph
+URL: https://potus-CaptKam.replit.app
+Color: Red (#ef4444)
+Tech: Express + PostgreSQL (local helium) + Claude AI + Drizzle ORM
+6 Autonomous Agents:
+
+News Sentinel (every 30 min) — breaking news, sentiment analysis, free crypto APIs + Claude web search
+Policy Scanner (every 2 hours) — Federal Register, SEC, Congress.gov, CFTC
+Whale Watcher (every 15 min) — blockchain wallet monitoring, WLF treasury, whale transactions
+Statement Tracker (every 1 hour) — Trump family + crypto leader statements, evasion detection
+Event Clusterer (every 4 hours) — groups related events, detects suspicious timing (insider signals)
+Entity Linker (every 6 hours) — discovers knowledge graph connections automatically
+
+Agent Pipeline: Gather raw data → Send to Claude AI → Parse JSON findings → Store in PostgreSQL → Forward to Oracle (significance ≥ 5) → Create alerts (significance ≥ 7)
+Database Tables:
+
+entities (720 rows) — people, companies, tokens, wallets
+events (22,431+ rows) — raw findings from all agents
+alerts (211 rows) — high-significance alerts
+transfers (2,790 rows) — on-chain transactions
+price_snapshots (33,234 rows) — historical token prices
+relations (242 rows) — knowledge graph connections
+wallet_snapshots (111 rows) — wallet state over time
+statements (0 rows) — Trump family statements (schema ready)
+research (34 rows) — AI research outputs (model: claude-sonnet-4-20250514)
+jobs (29 rows) — agent execution history
+notes (68 rows) — researcher annotations
+
+Key Endpoints:
+
+GET /api/health — system status + data counts
+GET /api/agents — agent status
+POST /api/agents/run — manually trigger any agent
+POST /api/agents/sweep — run all 6
+POST /api/events/incoming — webhook (saves + forwards to Oracle)
+GET /api/entities, /api/events, /api/alerts, /api/graph, /api/wallets, /api/transfers, /api/research, /api/statements, /api/prices, /api/jobs
+
+Forwarding: All events significance ≥ 5 forwarded to Oracle via server/services/oracle-forwarder.ts
+Current Status: Running, deployed, agents currently disabled (uncomment initAgentScheduler() on line 399 of server/index.ts to re-enable)
+
+System 2: Oracle — Quantitative Prediction Engine
+Purpose: 10-model quant engine, generates BUY/SELL/HOLD predictions with Kelly Criterion sizing
+URL: https://oracle-CaptKam.replit.app
+Color: Amber (#f59e0b)
+Tech: Express + PostgreSQL (local helium) + Drizzle ORM
+Pipeline Flow:
+Signal arrives → Save to signals table → Fetch POTUS context → 
+Load price history → Run Bayesian model → Run Logistic model → 
+Run momentum/zscore → Kelly Tournament ensemble → 
+Generate prediction per asset → Apply Atlas macro regime multiplier → 
+Save to predictions table → Forward top prediction to Jarvis
+10 Quantitative Models:
+
+Bayesian probability updating
+EWMA momentum
+Cosine similarity event matching
+Kelly Criterion position sizing
+Sharpe/Sortino/Calmar ratios
+Logistic regression with gradient descent
+Volatility-adjusted confidence
+Z-score mean reversion
+Exponential event decay weighting
+Monte Carlo simulation
+
+Kelly Betting Tournament: Based on arXiv:2602.09982, replaces hardcoded ensemble weights with academically grounded model evaluation
+8 Target Assets: BTC, ETH, SPY, GLD, USO, DJT, RUM, LMT
+Price Ingestion: FMP API every 15 minutes (each symbol individually)
+Atlas Macro Integration: Before every prediction, Oracle calls Atlas GET /api/v1/macro-regime. Returns Fear & Greed index, stablecoin supply, regime classification (EXTREME_FEAR/FEAR/NEUTRAL/GREED/EXTREME_GREED), and Kelly sizing multipliers. Currently F&G = 23 (EXTREME_FEAR), long_size_multiplier = 1.25x.
+Database Tables:
+
+signals — incoming political events
+predictions — generated BUY/SELL/HOLD with confidence, Kelly %, entry price
+price_snapshots — FMP price history for 8 assets
+model_weights — persisted Bayesian and logistic regression weights
+
+Key Endpoints:
+
+POST /api/signals/political — receive events from POTUS
+GET /api/predictions — prediction history
+GET /api/health — system status
+
+Confirmed Test Results:
+
+Signal "Trump signs Bitcoin reserve EO" → 8 predictions generated, 7 actionable
+BTC BUY 62% confidence, Kelly 3.51%, entry $72,945
+Macro regime (EXTREME_FEAR) applied 1.25x multiplier to long sizing
+Predictions saving to database confirmed
+Jarvis forwarding confirmed
+
+Known Issues:
+
+Resolution cycle model_weights null constraint error
+MOCK_FNG env var doesn't pass through npm on Replit (stress test incomplete)
+Old predictions missing entry prices (from migration)
+
+
+System 3: Atlas — Technical Analysis + Macro Data
+Purpose: Harmonic pattern detection, backtesting, on-chain macro metrics provider
+URL: https://atlas-CaptKam.replit.app
+Color: Emerald (#10b981)
+Tech: Express + PostgreSQL (local helium) + Drizzle ORM
+Features:
+
+Harmonic pattern scanning (Gartley, Bat, Alt Bat, Butterfly, ABCD)
+Backtesting framework
+Quality filters (7-rule validation gate)
+On-chain metrics storage (NEW: on_chain_metrics table)
+Macro regime API for Oracle
+
+On-Chain Metrics (NEW):
+
+on_chain_metrics table with: symbol, date, fear_greed_index, stablecoin_mint_volume, updated_at
+Oracle Bridge fetcher pulls from:
+
+Fear & Greed: api.alternative.me/fng/?limit=1 (free)
+Stablecoin supply: stablecoins.llama.fi/stablecoins (free, lightweight endpoint)
+
+
+Runs hourly, stores daily snapshots, prevents duplicates via unique index on (symbol, date)
+
+Macro Regime Endpoint: GET /api/v1/macro-regime
+json{
+  "timestamp": "2026-03-16T08:56:19.461Z",
+  "metrics": { "fear_greed_index": 23, "stablecoin_supply_usd": 314674210859.82 },
+  "oracle_directives": {
+    "regime": "EXTREME_FEAR",
+    "long_size_multiplier": 1.25,
+    "short_size_multiplier": 0.75
+  }
+}
+```
+
+**Regime Classification:**
+- F&G ≥ 75: EXTREME_GREED, long multiplier 0.5x
+- F&G ≥ 60: GREED, long multiplier 0.75x
+- F&G 41-59: NEUTRAL, multiplier 1.0x
+- F&G ≤ 40: FEAR, long multiplier 1.10x
+- F&G ≤ 25: EXTREME_FEAR, long multiplier 1.25x
+
+**Other Endpoints:**
+- GET /api/v1/pattern-check?symbol=BTCUSD&pattern=GARTLEY&timeframe=1day
+- GET /api/health
+
+**Recent Data Loss:** Drizzle push deleted auto_trade_settings (1 row), watchlist (41 items), and live_signals columns. Gemini reseeded watchlist and settings. Scanner self-heals live_signals.
+
+---
+
+### System 4: Jarvis — Senior Risk Analyst
+
+**Purpose:** Pre-trade compliance, risk review, approval/veto workflow
+
+**URL:** https://jarvis-CaptKam.replit.app
+
+**Color:** Violet (#8b5cf6)
+
+**Tech:** Express + PostgreSQL (local helium) + Claude AI + Drizzle ORM
+
+**Review Process:** Receives top predictions from Oracle → Claude AI analyzes with institutional logic → Returns APPROVE or VETO with confidence % and reasoning
+
+**Confirmed Behavior:**
+- BTC BUY 60% → VETO (75% confidence) — "Insufficient data infrastructure"
+- BTC SELL 50% → VETO (85% confidence) — "Weak signal, no political catalysts"
+- BTC BUY 60% → VETO (88% confidence) — "Contradictory reasoning"
+- BTC BUY 62% → VETO (97% confidence) — institutional reasoning applied
+
+**Connections:** claudeConfigured: true, potusConnected: true, atlasConnected: true, oracleConnected: true, commanderConnected: false
+
+**Key Endpoints:**
+- POST /api/review — receive prediction from Oracle for review
+- GET /api/health — system status
+
+**From Institutional Spec (planned):**
+- Hard limits (non-negotiable): position limits, margin, restricted lists, AML
+- Soft limits (alerts): market impact tolerance, venue selection, algorithm routing
+- Performance attribution: decompose returns into alpha, beta, factor tilts
+- Stress testing: simulate historical shocks against portfolio
+- Dynamic position sizing: volatility-adjusted via ATR/VIX
+
+---
+
+### System 5: Commander — Trade Execution (Separate Codebase)
+
+**Purpose:** Paper trading via Alpaca API, harmonic pattern execution
+
+**URL:** Runs on its own Replit (Pattern Bot)
+
+**Color:** Platinum (#e2e8f0)
+
+**Tech:** Express + React + Vite + Tailwind + PostgreSQL + Drizzle ORM + Alpaca API
+
+**NOT connected to Jarvis yet.** Running independently as a harmonic pattern trading bot.
+
+**Trading Engine:**
+- 30-second scan loop with mutex lock (no overlapping scans)
+- Scans 23 symbols (9 crypto + 14 equities) across 1D and 4H timeframes
+- 5 enabled patterns: Gartley, Bat, Alt Bat, Butterfly, ABCD
+- 2 disabled patterns: Crab, Deep Crab (low win rate)
+- Alpaca paper trading (https://paper-api.alpaca.markets)
+- Position sizing: 7% crypto, 5% equity per trade
+- Maximum 10 open positions, maximum 20 daily trades
+- TP1 at 38.2% AD retracement, TP2 at 61.8% AD retracement
+- Stop loss: beyond X (retracement patterns) or beyond D (extension patterns) + 5% XA buffer
+
+**Pipeline:**
+```
+Alpaca candle data → Pivot detection (5-bar left/right) → 
+Fibonacci ratio matching (±5% tolerance) → 7-rule quality filter → 
+Phase C screener → DB dedup → Zod validation → Save to PostgreSQL → 
+Place Alpaca limit order → Exit manager tracks fills → 
+TP1 (50% close) → TP2 (remaining close) → Software SL (market exit)
+```
+
+**7 Quality Rules:**
+1. XB ratio 0.2–1.0
+2. XD within pattern-specific bounds
+3. AC ratio 0.2–1.0
+4. Risk/reward ≥ 1.0
+5. Profit target ≥ 2.0%
+6. Fibonacci proximity ≤ 15% average deviation
+7. Pattern age within timeframe window (1D: 14 days, 4H: 7 days)
+
+**Exit Management:**
+- Phase 1: Check pending entries for fills
+- Phase 2: Check filled entries for TP order fills
+- Phase 3: Software SL — monitor price vs stop loss (market exit if breached)
+- Crypto monitor: WebSocket streaming prices for instant TP/SL detection
+- Fallback: REST position data if no stream price
+
+**Real-Time Price Streaming:**
+- Crypto: wss://stream.data.alpaca.markets/v1beta3/crypto/us (24/7)
+- Stocks: wss://stream.data.alpaca.markets/v2/sip (market hours only)
+- Auto-reconnect with exponential backoff
+- Heartbeat ping every 30s
+
+**Alpaca Safety:**
+- Anti-422 formatters: crypto qty max 9 decimals, stock qty whole shares
+- Rate limiter: 200 req/min (free tier), warns at 80%
+- Trading rate limiter: 60 req/min reserved for trading calls
+- Hard-to-borrow retry: GTC → DAY fallback for stock shorts
+- Buying power check before every order
+
+**Current Dashboard (App.tsx):** 1,100 lines, 4 tabs (Terminal, Analytics, Risk Engine, Logs), 3-panel Terminal layout. Working API wiring but hard to read — redesign planned as single-page vertical layout.
+
+**Dashboard Redesign Plan (not yet implemented):**
+- Single page, 6 sections, answers 4 questions top-to-bottom
+- Validation progress (X/15 trades to go-live)
+- Open positions with SL→TP pipeline bars
+- Approaching entry (within 5% of D only)
+- Capital allocation with GTC lock-up visibility
+- System issues (FIX/WARN/OK)
+- Widget visibility toggles in settings drawer
+
+**Planned Additions from Gemini:**
+- Time-in-Trade timeout: close stale positions after 8 bars (32 hours on 4H)
+- On-chain regime filter: block crypto longs if NUPL > 0.75, block shorts if MVRV < 1.0
+- Atlas macro integration for pattern quality scoring
+
+---
+
+### Inter-System Communication
+```
+POTUS → Oracle:  POST /api/signals/political (events with significance ≥ 5)
+Oracle → Atlas:  GET /api/v1/macro-regime (Fear & Greed, regime, sizing multipliers)
+Oracle → Atlas:  GET /api/v1/pattern-check (harmonic pattern confirmation)
+Oracle → Jarvis: POST /api/review (top prediction for approval)
+Jarvis → Commander: NOT CONNECTED YET (planned: POST /api/orders)
+```
+
+All communication via deployed .replit.app public URLs.
+
+---
+
+### Color System
+
+| System | Color | Hex | Meaning |
+|--------|-------|-----|---------|
+| POTUS | Red | #ef4444 | Political power, urgency |
+| Atlas | Emerald | #10b981 | Technical precision |
+| Oracle | Amber | #f59e0b | Computation, prediction |
+| Jarvis | Violet | #8b5cf6 | Judgment, wisdom |
+| Commander | Platinum | #e2e8f0 | Final authority, execution |
+| Base BG | Dark | #0a0f1a | Shared across all dashboards |
+
+---
+
+### Secrets / Environment Variables
+
+**POTUS:**
+- DATABASE_URL: postgresql://postgres:password@helium/heliumdb?sslmode=disable
+- WEBHOOK_SECRET: 157ea9066817e3a9374aad64eb8303cfecfa4d38192d9a0323a66da15f1fbc65
+- ORACLE_URL: https://oracle-CaptKam.replit.app
+- ANTHROPIC_API_KEY: sk-ant-api03-...
+- TELEGRAM_BOT_TOKEN: 8413562037:AAFLh34aeFNTf2HbV7N3cI05X8zLL143sKk
+- TELEGRAM_CHAT_ID: 7664508633
+- GEMINI_API_KEY: AIzaSyCxmuCNMwwKK4UuoLyJeooaZR0raZcfKN0
+
+**Oracle:**
+- DATABASE_URL: postgresql://postgres:password@helium/heliumdb?sslmode=disable
+- POTUS_URL: https://potus-CaptKam.replit.app
+- ATLAS_URL: https://atlas-CaptKam.replit.app
+- JARVIS_URL: https://jarvis-CaptKam.replit.app
+- FMP_API_KEY: (set in secrets)
+- ANTHROPIC_API_KEY: same as POTUS
+
+**Jarvis:**
+- POTUS_URL, ORACLE_URL, ATLAS_URL
+- ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+**Atlas:**
+- DATABASE_URL: local helium
+- Free API endpoints (no keys needed for Fear & Greed, DefiLlama)
+
+**Commander:**
+- DATABASE_URL: Neon PostgreSQL
+- ALPACA_API_KEY, ALPACA_API_SECRET
+- ALPACA_BASE_URL: https://paper-api.alpaca.markets
+- TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+**Neon Backup DB:** postgresql://neondb_owner:npg_IqZNH93FPiLC@ep-orange-thunder-adi75ylq-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require (45,990 rows migrated, blocked by Replit egress proxy on new projects)
+
+---
+
+### Academic Research Integrated
+
+1. **SSRN 2480662** — "Time Will Tell: Information in the Timing of Scheduled Earnings News" (Johnson & So, JFQA). Firms advancing announcement dates outperform delayers by 260 basis points. Applied to: Event Clusterer agent timing analysis, R-Score tracking for scheduled political events.
+
+2. **arXiv:2602.09982** — "Kelly Betting as Bayesian Model Evaluation." Basis for Oracle's Kelly Tournament ensemble weighting.
+
+3. **Institutional Spec Paper** — "Institutional Methodologies in Event-Driven Quantitative Trading" (custom). Covers: multi-agent architecture, FinBERT, wavelet transforms, on-chain metrics, market impact modeling, backtesting pitfalls, execution simulation.
+
+---
+
+### Confirmed End-to-End Pipeline Tests
+```
+Test 1: Event → POTUS (save #19) → Oracle (signal #4, 8 predictions) → Jarvis (review, VETO)
+Test 2: Political signal → Oracle (8 predictions, BTC BUY 62%, Kelly 3.51%) → Jarvis (VETO 97%)
+Test 3: Atlas macro-regime (F&G=23, EXTREME_FEAR, 1.25x) → Oracle ingested and applied
+
+Pending / Next Steps
+PriorityTaskStatus1Fix Oracle resolution cycle (model_weights null error)Bug2Complete stress test (mock EXTREME_GREED)Testing3Enable POTUS agents (uncomment initAgentScheduler)Quick fix4Rebuild Commander dashboard (single-page layout)In progress5Connect Jarvis → Commander (POST /api/orders)Not started6Build Commander market impact modelingNot started7Implement Jarvis hard/soft limits from specNot started8Build individual system dashboards with color systemNot started9Build master dashboard pulling from all 5 APIsNot started10Train Oracle models with resolved predictionsOngoing11Add R-Score tracking to POTUS Event ClustererNot started12Add FinBERT or Claude chain-of-thought evasion scoringNot started13Implement wavelet transforms in Oracle for signal denoisingNot started14Add 13F filing parsing to Policy ScannerNot started15Atlas: Time-in-Trade timeout for stale positionsGemini building16Atlas: On-chain regime filter (NUPL/MVRV blocking rules)Gemini building17Fix POTUS agents web search parsing (useWebSearch: false)Not started18Telegram alerts for Jarvis reportsNot started
+
+Replit Quirks Documented
+
+Deployed instances have separate DB context from dev instances
+Egress proxy blocks Neon (*.neon.tech) on new projects
+Each Replit has isolated PostgreSQL at helium:5432
+Deployed "private" sites redirect API calls to login — must be public
+Secrets with KEY=value format cause URL parse errors
+tsx watch doesn't always hot-reload — use Stop/Run
+BusyBox environment: no -x, -q, -E, -o flags for grep; head requires -n 3; cat doesn't support -n
+Environment variables set via export don't propagate to child processes spawned by npm run dev
+Drizzle push deletes tables/columns not in schema.ts — always use raw SQL for additive changes

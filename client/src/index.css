@@ -42,6 +42,15 @@
   --accent-red-dim: rgba(239, 68, 68, 0.08);
   --accent-amber: #f59e0b;
 
+  /* Active system — COMMANDER (Platinum) */
+  --sys-primary: var(--commander-primary);
+  --sys-light: var(--commander-light);
+  --sys-lighter: var(--commander-lighter);
+  --sys-dark: var(--commander-dark);
+  --sys-bg: var(--commander-bg);
+  --sys-border: var(--commander-border);
+  --sys-glow: var(--commander-glow);
+
   /* ATLAS — Emerald (Technical Analysis) — primary system */
   --atlas-primary: #10b981;
   --atlas-light: #34d399;
@@ -121,15 +130,15 @@ body {
 
 /* Card hover glow */
 .card-glow:hover {
-  border-color: var(--atlas-border) !important;
-  box-shadow: var(--atlas-glow);
+  border-color: var(--sys-border) !important;
+  box-shadow: var(--sys-glow);
 }
 
 /* Accent bar */
 .accent-bar {
   height: 2px;
   border-radius: 1px;
-  background: linear-gradient(90deg, var(--atlas-primary), var(--atlas-light));
+  background: linear-gradient(90deg, var(--sys-dark), var(--sys-light));
 }
 
 /* Status pulse */
@@ -149,6 +158,6 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at 50% 0%, rgba(16, 185, 129, 0.03) 0%, transparent 70%);
+  background: radial-gradient(ellipse at 50% 0%, rgba(226, 232, 240, 0.02) 0%, transparent 70%);
   pointer-events: none;
 }
