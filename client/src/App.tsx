@@ -2336,12 +2336,13 @@ function TradePage({
         const pivotPrices = [xP, aP, bP, cP, dP];
         const pivotLabels = ["X", "A", "B", "C", "D"];
 
-        // Find candle index for each pivot price, enforcing chronological order
-        function findPivotIndex(price: number, side: "high" | "low", startIdx: number): number {
+        // Find candle index for each pivot price
+        // Scan RIGHT-TO-LEFT to find the MOST RECENT pattern, not old historical ones
+        function findPivotIndex(price: number, side: "high" | "low", beforeIdx: number, afterIdx: number = 0): number {
           if (price <= 0 || isNaN(price)) return -1;
           let bestIdx = -1;
           let bestDiff = Infinity;
-          for (let i = startIdx; i < candles.length; i++) {
+          for (let i = Math.min(beforeIdx, candles.length - 1); i >= afterIdx; i--) {
             const cp = side === "high" ? candles[i].high : candles[i].low;
             const diff = Math.abs(cp - price);
             const pctDiff = diff / price;
@@ -2353,17 +2354,18 @@ function TradePage({
           return bestIdx;
         }
 
-        const pivotIndices: number[] = [];
-        let searchFrom = 0;
-        for (let i = 0; i < 4; i++) { // X, A, B, C (not D yet)
-          const idx = findPivotIndex(pivotPrices[i], pivotSide[i], searchFrom);
-          pivotIndices.push(idx);
-          if (idx >= 0) searchFrom = idx + 1;
-        }
+        // Strategy: find C first (most recent), then walk backwards for B, A, X
+        // Then find D after C
+        const lastIdx = candles.length - 1;
+        const cIdx = findPivotIndex(cP, pivotSide[3], lastIdx);
+        const bIdx = cIdx >= 0 ? findPivotIndex(bP, pivotSide[2], cIdx - 1) : -1;
+        const aIdx = bIdx >= 0 ? findPivotIndex(aP, pivotSide[1], bIdx - 1) : -1;
+        const xIdx = aIdx >= 0 ? findPivotIndex(xP, pivotSide[0], aIdx - 1) : -1;
 
-        // D might be projected (not yet on chart) or completed
-        const dIdx = findPivotIndex(dP, pivotSide[4], searchFrom);
-        pivotIndices.push(dIdx);
+        // D might be projected (not yet on chart) or completed — search after C
+        const dIdx = cIdx >= 0 ? findPivotIndex(dP, pivotSide[4], lastIdx, cIdx + 1) : -1;
+
+        const pivotIndices = [xIdx, aIdx, bIdx, cIdx, dIdx];
 
         // Build the pattern line data points
         const patternLineData: { time: any; value: number }[] = [];
