@@ -102,6 +102,36 @@ interface BotSettings {
   enabled_patterns: string[];
 }
 
+interface SignalPipelineEntry {
+  id: number;
+  symbol: string;
+  pattern: string;
+  timeframe: string;
+  direction: string;
+  status: string;
+  stage: string;
+  stageDetail: string;
+  stageColor: string;
+  entryPrice: number | null;
+  stopLoss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  score: number | null;
+  entryOrderId: string | null;
+  hasOrder: boolean;
+  detectedAt: string;
+  filledAt: string | null;
+  blockedReason: string | null;
+}
+
+interface SignalPipelineData {
+  signals: SignalPipelineEntry[];
+  summary: {
+    total: number;
+    byStage: Record<string, number>;
+  };
+}
+
 interface PipelineData {
   lastUpdatedAgo: number | null;
   symbolsScanned: number;
@@ -623,45 +653,34 @@ export default function App() {
                   <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
                 </div>
 
-                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-                    Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 5).length})
-                  </div>
-                  {approaching.filter((s) => (s.distancePct ?? 0) <= 5).slice(0, 8).map((s) => {
-                    const dist = s.distancePct ?? 0;
-                    return (
-                      <div key={s.id} className="flex items-center justify-between py-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span
-                            className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
-                            style={{
-                              background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                              color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
-                            }}
-                          >
-                            {s.direction === "long" ? "L" : "S"}
-                          </span>
-                          <span className="text-white truncate">{s.symbol}</span>
-                          {s.paperOnly && (
-                            <span className="text-[8px] px-1 py-px rounded shrink-0" style={{
-                              background: "rgba(205,166,97,0.15)",
-                              color: "var(--accent-amber)",
-                            }}>
-                              paper
-                            </span>
-                          )}
-                        </div>
-                        <span
-                          className="text-[9px] shrink-0 font-semibold"
-                          style={{ color: dist < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
-                        >
-                          {dist.toFixed(1)}%
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {approaching.filter((s) => (s.distancePct ?? 0) <= 5).length === 0 && (
-                    <div style={{ color: "var(--text-muted)" }}>None imminent</div>
+          {/* BOTTOM PANEL — tabbed: Feed | Pipeline | Scanner */}
+          <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
+            {/* Tab bar */}
+            <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+              {([
+                { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
+                { key: "signals" as const, label: "Signals", badge: signalPipeline ? String(signalPipeline.summary.total) : undefined },
+                { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
+                { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
+              ]).map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setBottomTab(tab.key)}
+                  className="flex items-center gap-1.5 px-3 h-7 text-[9px] uppercase tracking-widest font-semibold border-b-2"
+                  style={{
+                    borderColor: bottomTab === tab.key ? "var(--accent-green)" : "transparent",
+                    color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
+                    background: "transparent",
+                  }}
+                >
+                  {tab.label}
+                  {tab.badge && (
+                    <span className="text-[8px] px-1 py-px rounded" style={{
+                      background: bottomTab === tab.key ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
+                      color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
+                    }}>
+                      {tab.badge}
+                    </span>
                   )}
                 </div>
 
@@ -707,9 +726,61 @@ export default function App() {
                     <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
                   )}
                 </div>
-              </aside>
-            </>
-          )}
+              )}
+
+              {bottomTab === "signals" && (
+                <SignalPipelineView data={signalPipeline} />
+              )}
+
+              {bottomTab === "pipeline" && (
+                <ScanPipeline data={pipeline} />
+              )}
+
+              {bottomTab === "scanner" && (
+                <ScanStateView data={scanState} />
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT SIDEBAR (30%) — risk, stats, alerts */}
+        <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
+
+          {/* RISK */}
+          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
+            <Row label="Equity" value={fmt(equity)} />
+            <Row label="Buying Power" value={fmt(bp)} />
+            <Row label="Cash" value={fmt(account?.cash ?? bp)} />
+            <div className="mt-2">
+              <div className="flex justify-between text-[10px] mb-0.5">
+                <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
+                <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
+                  {lockedPct.toFixed(0)}%
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(lockedPct, 100)}%`,
+                    background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* STATS */}
+          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
+            <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
+            <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
+            <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
+            <Row label="Trades" value={String(history.length)} />
+            <Row label="Signals" value={String(signals.length)} />
+            <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
+          </div>
 
           {/* ============ FEED PAGE ============ */}
           {activePage === "feed" && (
@@ -1006,9 +1077,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="Market" value={data.marketOpen ? "Open" : "Closed"} color={data.marketOpen ? "var(--accent-green)" : "var(--text-muted)"} />
             <PipeMetric label="Timeframes" value="1D + 4H" sub="Both scanned each cycle" />
           </div>
-          <PipeBullet text={data.marketOpen
-            ? `All ${data.symbolsScanned} symbols scanned (market open)`
-            : `${data.cryptoCount} crypto scanned (equities skipped — market closed)`} />
+          <PipeBullet text={`All ${data.symbolsScanned} symbols scanned 24/7 (${data.cryptoCount} crypto · ${data.equityCount} equity)${!data.marketOpen ? " · Equity orders deferred" : ""}`} />
         </div>
       ),
     },
@@ -1024,7 +1093,7 @@ function ScanPipeline({ data }: { data: PipelineData | null }) {
             <PipeMetric label="4-Hour candles" value="90 days" sub="Cached 5 minutes" />
           </div>
           <PipeBullet text="Crypto and stocks batched into separate API calls" />
-          <PipeBullet text="Rate limiter: 200 req/min (Alpaca free tier)" />
+          <PipeBullet text="Rate limiter: 1000 req/min (Algo Trader Plus) · 100ms throttle" />
           <PipeBullet text="Paginated up to 15 pages per request" />
         </div>
       ),
