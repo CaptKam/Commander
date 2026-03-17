@@ -14,6 +14,22 @@ import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanC
 
 const router = Router();
 
+// ============================================================
+// In-memory response cache — reduces DB round-trips
+// Each cached endpoint stores { data, expiresAt }
+// ============================================================
+const responseCache = new Map<string, { data: any; expiresAt: number }>();
+
+function getCachedResponse<T>(key: string): T | null {
+  const entry = responseCache.get(key);
+  if (entry && entry.expiresAt > Date.now()) return entry.data as T;
+  return null;
+}
+
+function setCacheResponse(key: string, data: any, ttlMs: number): void {
+  responseCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
 // Alpaca trading API base (NOT market data)
 const rawBase = process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
 const ALPACA_BASE_URL = rawBase.replace(/\/v2\/?$/, "");
@@ -159,6 +175,8 @@ router.get("/signals", async (_req, res) => {
  * from Alpaca's closed order / activity history.
  */
 router.get("/metrics", async (_req, res) => {
+  const cached = getCachedResponse("metrics");
+  if (cached) return res.json(cached);
   try {
     const headers = alpacaHeaders();
     if (!headers) {
@@ -247,13 +265,15 @@ router.get("/metrics", async (_req, res) => {
     const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
     const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
 
-    res.json({
+    const result = {
       win_rate: Math.round(winRate * 10) / 10,
       profit_factor: Math.round(profitFactor * 100) / 100,
       total_trades: totalTrades,
       wins,
       losses,
-    });
+    };
+    setCacheResponse("metrics", result, 60_000); // 60s
+    res.json(result);
   } catch (err) {
     console.error("[API] Failed to compute metrics:", err);
     res.status(500).json({ error: "Failed to compute metrics" });
@@ -264,6 +284,8 @@ router.get("/metrics", async (_req, res) => {
  * GET /api/history — Closed orders from Alpaca for the Trade History graveyard.
  */
 router.get("/history", async (_req, res) => {
+  const cached = getCachedResponse("history");
+  if (cached) return res.json(cached);
   try {
     const headers = alpacaHeaders();
     if (!headers) {
@@ -315,6 +337,7 @@ router.get("/history", async (_req, res) => {
         };
       });
 
+    setCacheResponse("history", history, 30_000); // 30s
     res.json(history);
   } catch (err) {
     console.error("[API] Failed to fetch history:", err);
@@ -555,6 +578,8 @@ router.delete("/watchlist/:symbol", async (req, res) => {
  * GET /api/settings — Returns current bot configuration.
  */
 router.get("/settings", async (_req, res) => {
+  const cached = getCachedResponse("settings");
+  if (cached) return res.json(cached);
   try {
     const rows = await db.select().from(systemSettings).limit(1);
     if (rows.length === 0) {
@@ -567,13 +592,15 @@ router.get("/settings", async (_req, res) => {
       });
     }
     const s = rows[0];
-    res.json({
+    const result = {
       trading_enabled: s.tradingEnabled,
       equity_allocation: Number(s.equityAllocation),
       crypto_allocation: Number(s.cryptoAllocation),
       enabled_patterns: s.enabledPatterns as string[],
       go_live_target: s.goLiveTarget ?? 15,
-    });
+    };
+    setCacheResponse("settings", result, 120_000); // 2min
+    res.json(result);
   } catch (err) {
     console.error("[API] Failed to fetch settings:", err);
     res.status(500).json({ error: "Failed to fetch settings" });
@@ -618,6 +645,7 @@ router.post("/settings", async (req, res) => {
     }
 
     await db.update(systemSettings).set(updates).where(eq(systemSettings.id, 1));
+    responseCache.delete("settings"); // Invalidate cached settings
     console.log("[API] Settings updated:", updates);
     res.json({ ok: true, updated: updates });
   } catch (err) {
@@ -764,6 +792,8 @@ router.post("/fix-exits/:id", async (req, res) => {
  * Shows phase distribution, hot symbols, scheduling info, and universe context.
  */
 router.get("/scan-state", async (_req, res) => {
+  const cached = getCachedResponse("scan_state");
+  if (cached) return res.json(cached);
   try {
     const { getScanStateStats } = await import("./scan-scheduler");
     const stats = await getScanStateStats();
@@ -780,7 +810,9 @@ router.get("/scan-state", async (_req, res) => {
     const favorites = await db.select({ symbol: watchlist.symbol }).from(watchlist);
     const favoriteSymbols = favorites.map((f) => f.symbol);
 
-    res.json({ ...stats, totalUniverse, favoriteSymbols });
+    const result = { ...stats, totalUniverse, favoriteSymbols };
+    setCacheResponse("scan_state", result, 30_000); // 30s
+    res.json(result);
   } catch (err) {
     console.error("[API] Failed to fetch scan state:", err);
     res.status(500).json({ error: "Failed to fetch scan state" });
@@ -1037,6 +1069,8 @@ function getSignalStage(signal: any, isCrypto: boolean) {
  * GET /api/signals/pipeline — Full signal lifecycle with stage enrichment.
  */
 router.get("/signals/pipeline", async (_req, res) => {
+  const cached = getCachedResponse("signals_pipeline");
+  if (cached) return res.json(cached);
   try {
     const signals = await db
       .select()
@@ -1080,7 +1114,9 @@ router.get("/signals/pipeline", async (_req, res) => {
     for (const s of stages) byStage[s] = 0;
     for (const e of enriched) byStage[e.stage] = (byStage[e.stage] ?? 0) + 1;
 
-    res.json({ signals: enriched, summary: { total: enriched.length, byStage } });
+    const result = { signals: enriched, summary: { total: enriched.length, byStage } };
+    setCacheResponse("signals_pipeline", result, 15_000); // 15s
+    res.json(result);
   } catch (err) {
     console.error("[API] /api/signals/pipeline error:", err);
     res.status(500).json({ error: "Failed to fetch signal pipeline" });
