@@ -840,10 +840,12 @@ async function runScanCycle(): Promise<void> {
     );
   } catch (err) {
     console.error("[Orchestrator] Scan cycle failed:", err);
-    // Fire Telegram alert — but don't let a notification failure crash the loop
-    sendError(`Scan cycle #${scanCount} failed`, err).catch(() => {
-      console.error("[Orchestrator] Failed to send error notification");
-    });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (!errMsg.includes("TradingRateLimit")) {
+      sendError(`Scan cycle #${scanCount} failed`, err).catch(() => {
+        console.error("[Orchestrator] Failed to send error notification");
+      });
+    }
   } finally {
     // ---- Exit Manager: check fills, place TP/SL, manage lifecycle ----
     // Runs in finally so it executes even if the scan portion threw.

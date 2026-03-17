@@ -9,7 +9,7 @@
  */
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const TRADING_BUDGET = 200; // Algo Trader Plus: 1000/min total, reserve 200 for trading
+const TRADING_BUDGET = 300; // Algo Trader Plus: 1000/min total, reserve 300 for trading
 
 const timestamps: number[] = [];
 

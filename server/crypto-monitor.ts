@@ -271,6 +271,9 @@ export async function runCryptoMonitor(): Promise<void> {
     }
   } catch (err) {
     console.error("[PositionMonitor] Monitor cycle failed:", err);
-    sendError("Position monitor cycle failed", err).catch(() => {});
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("TradingRateLimit")) {
+      sendError("Position monitor cycle failed", err).catch(() => {});
+    }
   }
 }

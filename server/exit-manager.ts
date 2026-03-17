@@ -657,7 +657,10 @@ export async function runExitCycle(): Promise<void> {
     }
   } catch (err) {
     console.error("[ExitManager] Exit cycle failed:", err);
-    sendError("Exit manager cycle failed", err).catch(() => {});
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("TradingRateLimit")) {
+      sendError("Exit manager cycle failed", err).catch(() => {});
+    }
   }
 }
 
