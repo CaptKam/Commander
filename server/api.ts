@@ -929,6 +929,164 @@ router.get("/diagnostics/equity", async (_req, res) => {
   }
 });
 
+// ============================================================
+// Signal Pipeline — full lifecycle view of every signal
+// ============================================================
+
+function getSignalStage(signal: any, isCrypto: boolean) {
+  const status = signal.status;
+
+  if (status === "outranked") {
+    return {
+      label: "Outranked",
+      detail: `Beaten by higher-scored pattern on ${signal.symbol}`,
+      color: "gray",
+      blockedReason: "A better pattern was found on this symbol",
+    };
+  }
+
+  if (status === "paper_only") {
+    return {
+      label: "Paper Only",
+      detail: "Crypto SHORT — Alpaca doesn't support crypto shorting",
+      color: "yellow",
+      blockedReason: "Crypto shorts tracked for validation only",
+    };
+  }
+
+  if (status === "expired") {
+    return {
+      label: "Expired",
+      detail: "Signal aged out without filling",
+      color: "gray",
+      blockedReason: null,
+    };
+  }
+
+  if (status === "dismissed") {
+    return {
+      label: "Dismissed",
+      detail: "Manually dismissed or quality-rejected",
+      color: "gray",
+      blockedReason: null,
+    };
+  }
+
+  if (status === "closed") {
+    const pnl = signal.realizedPnl ? Number(signal.realizedPnl) : null;
+    return {
+      label: "Closed",
+      detail: `Trade completed${pnl != null ? ` — P/L: $${pnl.toFixed(2)}` : ""}`,
+      color: pnl != null && pnl > 0 ? "green" : "red",
+      blockedReason: null,
+    };
+  }
+
+  if (status === "filled" || status === "partial_exit") {
+    if (signal.tp1OrderId || signal.tp2OrderId || signal.slOrderId) {
+      return {
+        label: "Exiting",
+        detail: "Position open — waiting for TP/SL to hit",
+        color: "blue",
+        blockedReason: null,
+      };
+    }
+    return {
+      label: "Filled",
+      detail: "Entry filled — setting up exit orders",
+      color: "blue",
+      blockedReason: null,
+    };
+  }
+
+  if (status === "pending" && signal.entryOrderId) {
+    return {
+      label: "Order Placed",
+      detail: "Limit order active on Alpaca — waiting for price to reach entry",
+      color: "orange",
+      blockedReason: null,
+    };
+  }
+
+  if (status === "pending" && !signal.entryOrderId) {
+    if (!isCrypto && !isStockMarketOpen()) {
+      return {
+        label: "Market Closed",
+        detail: "Equity signal detected — order will be placed when market opens",
+        color: "yellow",
+        blockedReason: "Stock market is closed",
+      };
+    }
+    return {
+      label: "Detected",
+      detail: "Signal detected — awaiting order placement",
+      color: "purple",
+      blockedReason: null,
+    };
+  }
+
+  return {
+    label: status || "Unknown",
+    detail: `Status: ${status}`,
+    color: "gray",
+    blockedReason: null,
+  };
+}
+
+/**
+ * GET /api/signals/pipeline — Full signal lifecycle with stage enrichment.
+ */
+router.get("/signals/pipeline", async (_req, res) => {
+  try {
+    const signals = await db
+      .select()
+      .from(liveSignals)
+      .where(sql`${liveSignals.createdAt} > NOW() - INTERVAL '7 days'`)
+      .orderBy(desc(liveSignals.createdAt))
+      .limit(200);
+
+    const enriched = signals.map((signal) => {
+      const isCrypto = signal.symbol.includes("/");
+      const stage = getSignalStage(signal, isCrypto);
+
+      return {
+        id: signal.id,
+        symbol: signal.symbol,
+        pattern: signal.patternType,
+        timeframe: signal.timeframe,
+        direction: signal.direction,
+        status: signal.status,
+        stage: stage.label,
+        stageDetail: stage.detail,
+        stageColor: stage.color,
+        entryPrice: signal.entryPrice ? Number(signal.entryPrice) : null,
+        stopLoss: signal.stopLossPrice ? Number(signal.stopLossPrice) : null,
+        tp1: signal.tp1Price ? Number(signal.tp1Price) : null,
+        tp2: signal.tp2Price ? Number(signal.tp2Price) : null,
+        score: signal.score ?? null,
+        entryOrderId: signal.entryOrderId ?? null,
+        hasOrder: !!signal.entryOrderId,
+        detectedAt: signal.createdAt,
+        filledAt: signal.executedAt ?? null,
+        blockedReason: stage.blockedReason ?? null,
+      };
+    });
+
+    const stages = [
+      "Detected", "Outranked", "Paper Only", "Market Closed",
+      "Order Placed", "Filled", "Exiting", "Closed", "Expired", "Dismissed",
+    ];
+    const byStage: Record<string, number> = {};
+    for (const s of stages) byStage[s] = 0;
+    for (const e of enriched) byStage[e.stage] = (byStage[e.stage] ?? 0) + 1;
+
+    res.json({ signals: enriched, summary: { total: enriched.length, byStage } });
+  } catch (err) {
+    console.error("[API] /api/signals/pipeline error:", err);
+    res.status(500).json({ error: "Failed to fetch signal pipeline" });
+  }
+});
+
 /**
  * GET /api/diagnostics/full — Comprehensive system diagnostics aggregator.
  * Single endpoint that pulls scanner health, pipeline, orders, signals, account,
