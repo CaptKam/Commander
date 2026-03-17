@@ -653,34 +653,19 @@ export default function App() {
                   <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
                 </div>
 
-          {/* BOTTOM PANEL — tabbed: Feed | Pipeline | Scanner */}
-          <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
-            {/* Tab bar */}
-            <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-              {([
-                { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
-                { key: "signals" as const, label: "Signals", badge: signalPipeline ? String(signalPipeline.summary.total) : undefined },
-                { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
-                { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
-              ]).map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setBottomTab(tab.key)}
-                  className="flex items-center gap-1.5 px-3 h-7 text-[9px] uppercase tracking-widest font-semibold border-b-2"
-                  style={{
-                    borderColor: bottomTab === tab.key ? "var(--accent-green)" : "transparent",
-                    color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
-                    background: "transparent",
-                  }}
-                >
-                  {tab.label}
-                  {tab.badge && (
-                    <span className="text-[8px] px-1 py-px rounded" style={{
-                      background: bottomTab === tab.key ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
-                      color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
-                    }}>
-                      {tab.badge}
-                    </span>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                    Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 2).length})
+                  </div>
+                  {approaching.filter((s) => (s.distancePct ?? 0) <= 2).length === 0 ? (
+                    <div style={{ color: "var(--text-muted)" }}>None imminent</div>
+                  ) : (
+                    approaching.filter((s) => (s.distancePct ?? 0) <= 2).map((s, i) => (
+                      <div key={i} className="flex items-center justify-between py-0.5">
+                        <span className="text-white">{s.symbol}</span>
+                        <span className="text-[9px]" style={{ color: "var(--accent-amber)" }}>{(s.distancePct ?? 0).toFixed(1)}%</span>
+                      </div>
+                    ))
                   )}
                 </div>
 
@@ -708,11 +693,11 @@ export default function App() {
                         <span
                           className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
                           style={{
-                            background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                            color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                            background: (t.direction ?? "") === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                            color: (t.direction ?? "") === "long" ? "var(--accent-green)" : "var(--accent-red)",
                           }}
                         >
-                          {t.direction === "long" ? "L" : "S"}
+                          {(t.direction ?? "") === "long" ? "L" : "S"}
                         </span>
                         <span className="text-white truncate">{t.symbol}</span>
                         <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{t.pattern}</span>
@@ -726,61 +711,9 @@ export default function App() {
                     <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
                   )}
                 </div>
-              )}
-
-              {bottomTab === "signals" && (
-                <SignalPipelineView data={signalPipeline} />
-              )}
-
-              {bottomTab === "pipeline" && (
-                <ScanPipeline data={pipeline} />
-              )}
-
-              {bottomTab === "scanner" && (
-                <ScanStateView data={scanState} />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT SIDEBAR (30%) — risk, stats, alerts */}
-        <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
-
-          {/* RISK */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
-            <Row label="Equity" value={fmt(equity)} />
-            <Row label="Buying Power" value={fmt(bp)} />
-            <Row label="Cash" value={fmt(account?.cash ?? bp)} />
-            <div className="mt-2">
-              <div className="flex justify-between text-[10px] mb-0.5">
-                <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
-                <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                  {lockedPct.toFixed(0)}%
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min(lockedPct, 100)}%`,
-                    background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* STATS */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
-            <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
-            <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
-            <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
-            <Row label="Trades" value={String(history.length)} />
-            <Row label="Signals" value={String(signals.length)} />
-            <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
-          </div>
+              </aside>
+            </>
+          )}
 
           {/* ============ FEED PAGE ============ */}
           {activePage === "feed" && (
@@ -818,13 +751,6 @@ export default function App() {
                   <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
                 )}
               </div>
-            </div>
-          )}
-
-          {/* ============ SIGNALS PAGE ============ */}
-          {activePage === "signals" && (
-            <div className="flex-1 overflow-y-auto">
-              <SignalPipelineView data={signalPipeline} />
             </div>
           )}
 
