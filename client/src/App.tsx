@@ -2251,16 +2251,18 @@ function TradePage({
   // Render chart
   useEffect(() => {
     if (!chartContainerRef.current || candles.length === 0) return;
+    let disposed = false;
 
     // Dynamic import
     import("lightweight-charts").then(({ createChart, ColorType, LineStyle }) => {
-      // Clean up previous
+      if (disposed || !chartContainerRef.current) return;
+
       if (chartInstanceRef.current) {
-        chartInstanceRef.current.remove();
+        try { chartInstanceRef.current.remove(); } catch {}
         chartInstanceRef.current = null;
       }
 
-      const container = chartContainerRef.current!;
+      const container = chartContainerRef.current;
       const chart = createChart(container, {
         width: container.clientWidth,
         height: container.clientHeight,
@@ -2473,12 +2475,13 @@ function TradePage({
 
       // Resize observer
       const observer = new ResizeObserver(() => {
-        if (chartInstanceRef.current) {
+        if (disposed || !chartInstanceRef.current) return;
+        try {
           chart.applyOptions({
             width: container.clientWidth,
             height: container.clientHeight,
           });
-        }
+        } catch {}
       });
       observer.observe(container);
 
@@ -2488,8 +2491,9 @@ function TradePage({
     });
 
     return () => {
+      disposed = true;
       if (chartInstanceRef.current) {
-        chartInstanceRef.current.remove();
+        try { chartInstanceRef.current.remove(); } catch {}
         chartInstanceRef.current = null;
       }
     };
