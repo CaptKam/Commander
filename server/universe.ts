@@ -126,6 +126,18 @@ const EXCLUDED_NAME_PATTERNS = [
   /preferred/i,
 ];
 
+// Suffix-based junk detection for 5+ character tickers.
+// Many warrants (W), units (U), rights (R), preferred (P), notes (N/O/M/L)
+// slip through name-based filtering because Alpaca doesn't always label them.
+const DEFINITE_JUNK_SUFFIXES = new Set(["W", "U", "R"]);
+const MAYBE_JUNK_SUFFIXES = new Set(["P", "N", "O", "M", "L"]);
+
+function isLikelyJunkTicker(symbol: string): boolean {
+  if (symbol.length < 5) return false;
+  const last = symbol[symbol.length - 1];
+  return DEFINITE_JUNK_SUFFIXES.has(last) || MAYBE_JUNK_SUFFIXES.has(last);
+}
+
 function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): FilteredAsset[] {
   const results: FilteredAsset[] = [];
 
@@ -133,6 +145,7 @@ function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): 
   let filteredByExchange = 0;
   let filteredBySymbolFormat = 0;
   let filteredByName = 0;
+  let filteredBySuffix = 0;
 
   // Equity filters
   for (const asset of raw.equities) {
@@ -157,6 +170,11 @@ function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): 
     // by checking the asset name from Alpaca (more reliable than ticker suffix)
     if (EXCLUDED_NAME_PATTERNS.some((re) => re.test(asset.name))) {
       filteredByName++;
+      continue;
+    }
+    // Suffix-based filter for 5+ char tickers ending in W/U/R/P/N/O/M/L
+    if (isLikelyJunkTicker(asset.symbol)) {
+      filteredBySuffix++;
       continue;
     }
 
@@ -187,7 +205,7 @@ function filterAssets(raw: { equities: AlpacaAsset[]; crypto: AlpacaAsset[] }): 
   const cryptoCount = results.length - equityCount;
   console.log(
     `[Universe] Filtered: ${filteredByStatus} by status, ${filteredByExchange} by exchange, ` +
-    `${filteredBySymbolFormat} by symbol format, ${filteredByName} by name (warrants/units/rights/preferred)`,
+    `${filteredBySymbolFormat} by symbol format, ${filteredByName} by name, ${filteredBySuffix} by suffix`,
   );
   console.log(`[Universe] Final: ${equityCount} equities, ${cryptoCount} crypto`);
 

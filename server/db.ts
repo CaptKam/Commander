@@ -185,6 +185,21 @@ export async function ensureTablesExist(): Promise<void> {
       ON symbol_scan_state (symbol, timeframe)
     `);
     console.log("[DB] Table symbol_scan_state: OK");
+
+    // Purge junk symbols (warrants, units, rights, preferred, etc.)
+    // that were seeded before name/suffix filtering was tightened.
+    const purgeResult = await db.execute(sql`
+      DELETE FROM symbol_scan_state
+      WHERE symbol NOT LIKE '%/%'
+        AND LENGTH(symbol) >= 5
+        AND phase = 'NO_PATTERN'
+        AND (
+          symbol LIKE '%W' OR symbol LIKE '%U' OR symbol LIKE '%R' OR
+          symbol LIKE '%P' OR symbol LIKE '%N' OR symbol LIKE '%O' OR
+          symbol LIKE '%M' OR symbol LIKE '%L'
+        )
+    `);
+    console.log(`[DB] Purged ${purgeResult.rowCount ?? 0} junk symbol rows from symbol_scan_state`);
   } catch (err) {
     console.error("[DB] Failed to ensure tables exist:", err);
   }

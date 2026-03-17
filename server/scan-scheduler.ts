@@ -337,6 +337,7 @@ export async function seedUniverse(
 
   // Find existing symbols not in the new universe
   const existingSymbolSet = new Set(existingRows.map((r) => r.symbol));
+  const delistedSymbols: string[] = [];
   for (const existingSym of existingSymbolSet) {
     if (!universeSymbols.has(existingSym)) {
       try {
@@ -345,11 +346,14 @@ export async function seedUniverse(
           .set({ nextScanDue: pauseDate, updatedAt: new Date(now) })
           .where(sql`${symbolScanState.symbol} = ${existingSym}`);
         removed++;
-        console.log(`[Scheduler] Delisted symbol paused: ${existingSym}`);
+        delistedSymbols.push(existingSym);
       } catch (err) {
         console.error(`[Scheduler] Failed to pause delisted symbol ${existingSym}:`, err);
       }
     }
+  }
+  if (delistedSymbols.length > 0) {
+    console.log(`[Scheduler] Paused ${delistedSymbols.length} delisted symbols (e.g. ${delistedSymbols.slice(0, 5).join(", ")})`);
   }
 
   const existing = existingKeys.size - (removed * 2); // approximate existing (both timeframes)
