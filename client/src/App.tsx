@@ -5,6 +5,11 @@ import {
   XCircle,
   Plus,
   Zap,
+  LayoutDashboard,
+  Activity,
+  Radar,
+  Stethoscope,
+  Radio,
 } from "lucide-react";
 
 // ============================================================
@@ -454,110 +459,168 @@ export default function App() {
       )}
 
       {/* ================================================================ */}
-      {/* MAIN BODY — two columns                                          */}
+      {/* MAIN BODY — left nav sidebar + page content                       */}
       {/* ================================================================ */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT: blotter + feed (70%) */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
+        {/* LEFT NAV SIDEBAR */}
+        <nav className="shrink-0 flex flex-col items-center py-2 gap-1 border-r" style={{ width: 52, borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+          {([
+            { key: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
+            { key: "feed" as const, icon: Radio, label: "Feed" },
+            { key: "pipeline" as const, icon: Activity, label: "Pipeline" },
+            { key: "scanner" as const, icon: Radar, label: "Scanner" },
+            { key: "diagnostics" as const, icon: Stethoscope, label: "Diagnostics" },
+          ] as const).map((item) => {
+            const active = activePage === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => setActivePage(item.key)}
+                className="w-10 h-10 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-colors"
+                style={{
+                  background: active ? "var(--accent-green-dim)" : "transparent",
+                  color: active ? "var(--accent-green)" : "var(--text-muted)",
+                  border: active ? "1px solid #166534" : "1px solid transparent",
+                }}
+                title={item.label}
+              >
+                <item.icon className="w-4 h-4" />
+                <span className="text-[7px] uppercase tracking-wider font-semibold leading-none">{item.label.slice(0, 5)}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-          {/* BLOTTER */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="shrink-0 flex items-center justify-between px-3 h-7 border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-              <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
-                Positions ({positions.length})
-              </span>
-              <div className="flex gap-2">
-                {(["pnl", "pct", "symbol"] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setBlotterSort(s)}
-                    className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded"
-                    style={blotterSort === s
-                      ? { color: "var(--accent-green)", background: "var(--accent-green-dim)" }
-                      : { color: "var(--text-muted)" }}
-                  >
-                    {s === "pnl" ? "P&L" : s === "pct" ? "%" : "A-Z"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Column headers */}
-            <div className="shrink-0 grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1 text-[9px] uppercase tracking-wider border-b"
-              style={{ borderColor: "var(--border-color)", color: "var(--text-muted)", background: "var(--bg-main)" }}>
-              <div>Symbol</div>
-              <div>Side</div>
-              <div className="text-right">Qty</div>
-              <div className="text-right">Entry</div>
-              <div className="text-right">Last</div>
-              <div className="text-right">SL</div>
-              <div className="text-right">TP1</div>
-              <div className="text-right">TP2</div>
-              <div className="text-right">P&L</div>
-            </div>
-
-            {/* Rows */}
-            <div className="flex-1 overflow-y-auto">
-              {sortedPositions.length === 0 ? (
-                <div className="px-3 py-6 text-center" style={{ color: "var(--text-muted)" }}>
-                  No open positions
-                </div>
-              ) : (
-                sortedPositions.map((p) => (
-                  <div
-                    key={p.symbol}
-                    className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-b items-center"
-                    style={{ borderColor: "rgba(255,255,255,0.03)" }}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-white font-semibold truncate">{p.symbol}</span>
-                      {p.pattern && <span className="text-[9px] truncate" style={{ color: "var(--accent-amber)" }}>{p.pattern}</span>}
-                    </div>
-                    <div>
-                      <span
-                        className="text-[9px] px-1 py-px rounded uppercase font-semibold"
-                        style={{
-                          background: p.side === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                          color: p.side === "long" ? "var(--accent-green)" : "var(--accent-red)",
-                        }}
+        {/* PAGE CONTENT */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* ============ DASHBOARD PAGE ============ */}
+          {activePage === "dashboard" && (
+            <>
+              <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
+                {/* BLOTTER */}
+                <div className="shrink-0 flex items-center justify-between px-3 h-7 border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+                  <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--text-muted)" }}>
+                    Positions ({positions.length})
+                  </span>
+                  <div className="flex gap-2">
+                    {(["pnl", "pct", "symbol"] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setBlotterSort(s)}
+                        className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded"
+                        style={blotterSort === s
+                          ? { color: "var(--accent-green)", background: "var(--accent-green-dim)" }
+                          : { color: "var(--text-muted)" }}
                       >
-                        {p.side}
+                        {s === "pnl" ? "P&L" : s === "pct" ? "%" : "A-Z"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="shrink-0 grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1 text-[9px] uppercase tracking-wider border-b"
+                  style={{ borderColor: "var(--border-color)", color: "var(--text-muted)", background: "var(--bg-main)" }}>
+                  <div>Symbol</div>
+                  <div>Side</div>
+                  <div className="text-right">Qty</div>
+                  <div className="text-right">Entry</div>
+                  <div className="text-right">Last</div>
+                  <div className="text-right">SL</div>
+                  <div className="text-right">TP1</div>
+                  <div className="text-right">TP2</div>
+                  <div className="text-right">P&L</div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                  {sortedPositions.length === 0 ? (
+                    <div className="px-3 py-6 text-center" style={{ color: "var(--text-muted)" }}>
+                      No open positions
+                    </div>
+                  ) : (
+                    sortedPositions.map((p) => (
+                      <div
+                        key={p.symbol}
+                        className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-b items-center"
+                        style={{ borderColor: "rgba(255,255,255,0.03)" }}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-white font-semibold truncate">{p.symbol}</span>
+                          {p.pattern && <span className="text-[9px] truncate" style={{ color: "var(--accent-amber)" }}>{p.pattern}</span>}
+                        </div>
+                        <div>
+                          <span
+                            className="text-[9px] px-1 py-px rounded uppercase font-semibold"
+                            style={{
+                              background: p.side === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                              color: p.side === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                            }}
+                          >
+                            {p.side}
+                          </span>
+                        </div>
+                        <div className="text-right" style={{ color: "var(--text-main)" }}>{p.qty < 1 ? p.qty.toFixed(6) : p.qty.toFixed(2)}</div>
+                        <div className="text-right" style={{ color: "var(--text-muted)" }}>{fmt(p.entry_price)}</div>
+                        <div className="text-right text-white">{fmt(p.current_price)}</div>
+                        <div className="text-right" style={{ color: "var(--accent-red)" }}>{p.stop_loss ? fmt(p.stop_loss) : "—"}</div>
+                        <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp1 ? fmt(p.tp1) : "—"}</div>
+                        <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp2 ? fmt(p.tp2) : "—"}</div>
+                        <div className="text-right font-semibold" style={{ color: p.unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                          {p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {positions.length > 0 && (
+                    <div
+                      className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-t"
+                      style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
+                    >
+                      <div className="text-[9px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total</div>
+                      <div /><div /><div /><div /><div /><div /><div />
+                      <div className="text-right font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                        {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT SIDEBAR — risk, stats, alerts */}
+              <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
+                  <Row label="Equity" value={fmt(equity)} />
+                  <Row label="Buying Power" value={fmt(bp)} />
+                  <Row label="Cash" value={fmt(account?.cash ?? bp)} />
+                  <div className="mt-2">
+                    <div className="flex justify-between text-[10px] mb-0.5">
+                      <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
+                      <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
+                        {lockedPct.toFixed(0)}%
                       </span>
                     </div>
-                    <div className="text-right" style={{ color: "var(--text-main)" }}>{p.qty < 1 ? p.qty.toFixed(6) : p.qty.toFixed(2)}</div>
-                    <div className="text-right" style={{ color: "var(--text-muted)" }}>{fmt(p.entry_price)}</div>
-                    <div className="text-right text-white">{fmt(p.current_price)}</div>
-                    <div className="text-right" style={{ color: "var(--accent-red)" }}>{p.stop_loss ? fmt(p.stop_loss) : "—"}</div>
-                    <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp1 ? fmt(p.tp1) : "—"}</div>
-                    <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp2 ? fmt(p.tp2) : "—"}</div>
-                    <div className="text-right font-semibold" style={{ color: p.unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                      {p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}
+                    <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(lockedPct, 100)}%`,
+                          background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
+                        }}
+                      />
                     </div>
                   </div>
-                ))
-              )}
-
-              {/* Blotter total row */}
-              {positions.length > 0 && (
-                <div
-                  className="grid grid-cols-[1fr_50px_65px_70px_70px_70px_70px_70px_75px] gap-1 px-3 py-1.5 border-t"
-                  style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
-                >
-                  <div className="text-[9px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total</div>
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div />
-                  <div className="text-right font-bold" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                    {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
-                  </div>
                 </div>
-              )}
-            </div>
-          </div>
+
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
+                  <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
+                  <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
+                  <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
+                  <Row label="Trades" value={String(history.length)} />
+                  <Row label="Signals" value={String(signals.length)} />
+                  <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
+                </div>
 
           {/* BOTTOM PANEL — tabbed: Feed | Pipeline | Scanner */}
           <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
@@ -588,41 +651,48 @@ export default function App() {
                       {tab.badge}
                     </span>
                   )}
-                </button>
-              ))}
-            </div>
+                </div>
 
-            {/* Tab content */}
-            <div className="flex-1 overflow-y-auto">
-              {bottomTab === "feed" && (
-                <div className="px-3 py-1">
-                  {feed.map((e, i) => (
-                    <div key={i} className="flex items-start gap-2 py-0.5 leading-tight">
-                      <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
-                        {ts(e.time)}
+                <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Alerts</div>
+                  {alerts.map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 py-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{
+                        background: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)",
+                      }} />
+                      <span style={{ color: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }}>
+                        {a.text}
                       </span>
-                      <span
-                        className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
-                        style={{
-                          background: e.tag === "FILL" ? "var(--accent-green-dim)"
-                            : e.tag === "REJECT" ? "var(--accent-red-dim)"
-                            : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
-                            : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
-                            : "rgba(205,166,97,0.15)",
-                          color: e.tag === "FILL" ? "var(--accent-green)"
-                            : e.tag === "REJECT" ? "var(--accent-red)"
-                            : e.tag === "NEAR" ? "var(--accent-amber)"
-                            : e.tag === "CLOSED" ? "var(--text-muted)"
-                            : "var(--accent-amber)",
-                        }}
-                      >
-                        {e.tag}
-                      </span>
-                      <span style={{ color: e.color }}>{e.text}</span>
                     </div>
                   ))}
-                  {feed.length === 0 && (
-                    <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
+                </div>
+
+                <div className="px-3 py-3 flex-1">
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                    Recent Fills ({history.length})
+                  </div>
+                  {history.slice(0, 10).map((t, i) => (
+                    <div key={i} className="flex items-center justify-between py-0.5">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
+                          style={{
+                            background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                            color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                          }}
+                        >
+                          {t.direction === "long" ? "L" : "S"}
+                        </span>
+                        <span className="text-white truncate">{t.symbol}</span>
+                        <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{t.pattern}</span>
+                      </div>
+                      <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>
+                        {dateShort(t.filled_at)}
+                      </span>
+                    </div>
+                  ))}
+                  {history.length === 0 && (
+                    <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
                   )}
                 </div>
               )}
@@ -681,94 +751,66 @@ export default function App() {
             <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
           </div>
 
-          {/* APPROACHING (imminent only) */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-              Imminent ({approaching.filter((s) => (s.distancePct ?? 0) <= 5).length})
-            </div>
-            {approaching.filter((s) => (s.distancePct ?? 0) <= 5).slice(0, 8).map((s) => {
-              const dist = s.distancePct ?? 0;
-              return (
-                <div key={s.id} className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
+          {/* ============ FEED PAGE ============ */}
+          {activePage === "feed" && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-4 py-3">
+                <div className="text-[9px] uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--accent-green)" }}>
+                  Live Event Feed ({feed.length})
+                </div>
+                {feed.map((e, i) => (
+                  <div key={i} className="flex items-start gap-2 py-1 leading-tight">
+                    <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                      {ts(e.time)}
+                    </span>
                     <span
-                      className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
+                      className="shrink-0 text-[9px] px-1 py-px rounded font-semibold uppercase"
                       style={{
-                        background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                        color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                        background: e.tag === "FILL" ? "var(--accent-green-dim)"
+                          : e.tag === "REJECT" ? "var(--accent-red-dim)"
+                          : e.tag === "NEAR" ? "rgba(205,166,97,0.15)"
+                          : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)"
+                          : "rgba(205,166,97,0.15)",
+                        color: e.tag === "FILL" ? "var(--accent-green)"
+                          : e.tag === "REJECT" ? "var(--accent-red)"
+                          : e.tag === "NEAR" ? "var(--accent-amber)"
+                          : e.tag === "CLOSED" ? "var(--text-muted)"
+                          : "var(--accent-amber)",
                       }}
                     >
-                      {s.direction === "long" ? "L" : "S"}
+                      {e.tag}
                     </span>
-                    <span className="text-white truncate">{s.symbol}</span>
-                    {s.paperOnly && (
-                      <span className="text-[8px] px-1 py-px rounded shrink-0" style={{
-                        background: "rgba(205,166,97,0.15)",
-                        color: "var(--accent-amber)",
-                      }}>
-                        paper
-                      </span>
-                    )}
+                    <span style={{ color: e.color }}>{e.text}</span>
                   </div>
-                  <span
-                    className="text-[9px] shrink-0 font-semibold"
-                    style={{ color: dist < 2 ? "var(--accent-red)" : "var(--accent-amber)" }}
-                  >
-                    {dist.toFixed(1)}%
-                  </span>
-                </div>
-              );
-            })}
-            {approaching.filter((s) => (s.distancePct ?? 0) <= 5).length === 0 && (
-              <div style={{ color: "var(--text-muted)" }}>None imminent</div>
-            )}
-          </div>
-
-          {/* ALERTS */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Alerts</div>
-            {alerts.map((a, i) => (
-              <div key={i} className="flex items-center gap-2 py-0.5">
-                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{
-                  background: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)",
-                }} />
-                <span style={{ color: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                  {a.text}
-                </span>
+                ))}
+                {feed.length === 0 && (
+                  <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>
+                )}
               </div>
-            ))}
-          </div>
-
-          {/* RECENT FILLS */}
-          <div className="px-3 py-3 flex-1">
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-              Recent Fills ({history.length})
             </div>
-            {history.slice(0, 10).map((t, i) => (
-              <div key={i} className="flex items-center justify-between py-0.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
-                    style={{
-                      background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                      color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
-                    }}
-                  >
-                    {t.direction === "long" ? "L" : "S"}
-                  </span>
-                  <span className="text-white truncate">{t.symbol}</span>
-                  <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{t.pattern}</span>
-                </div>
-                <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>
-                  {dateShort(t.filled_at)}
-                </span>
-              </div>
-            ))}
-            {history.length === 0 && (
-              <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
-            )}
-          </div>
-        </aside>
+          )}
+
+          {/* ============ PIPELINE PAGE ============ */}
+          {activePage === "pipeline" && (
+            <div className="flex-1 overflow-y-auto">
+              <ScanPipeline data={pipeline} />
+            </div>
+          )}
+
+          {/* ============ SCANNER PAGE ============ */}
+          {activePage === "scanner" && (
+            <div className="flex-1 overflow-y-auto">
+              <ScanStateView data={scanState} />
+            </div>
+          )}
+
+          {/* ============ DIAGNOSTICS PAGE ============ */}
+          {activePage === "diagnostics" && (
+            <div className="flex-1 overflow-y-auto">
+              <DiagnosticsView />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1406,6 +1448,304 @@ function ScanStateView({ data }: { data: ScanStateData | null }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Diagnostics View — comprehensive system health dashboard
+// ============================================================
+function DiagnosticsView() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const fetchDiag = useCallback(async () => {
+    try {
+      const res = await fetch("/api/diagnostics/full");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+      setError(null);
+    } catch (err: any) {
+      setError(err.message ?? "Failed to fetch diagnostics");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDiag();
+    if (!autoRefresh) return;
+    const id = setInterval(fetchDiag, 15_000);
+    return () => clearInterval(id);
+  }, [fetchDiag, autoRefresh]);
+
+  if (loading && !data) {
+    return (
+      <div className="p-6 text-center">
+        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Loading diagnostics...</span>
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <div className="p-6 text-center">
+        <span className="text-[10px]" style={{ color: "var(--accent-red)" }}>Error: {error}</span>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const sys = data.system ?? {};
+  const ws = data.websocket ?? {};
+  const pipe = data.pipeline ?? {};
+  const scanner = data.scanner ?? {};
+  const orders = data.orders ?? {};
+  const acct = data.account;
+  const sigs = data.signals ?? {};
+  const cache = data.cache ?? {};
+
+  const scanAge = sys.lastScanAgeSeconds ?? null;
+  const scanHealthy = scanAge != null && scanAge < 120;
+
+  const signalSummary = (sigs.summary ?? []) as any[];
+  const staleSignals = (sigs.stale ?? []) as any[];
+
+  const totalSignalsByStatus: Record<string, number> = {};
+  for (const row of signalSummary) {
+    const status = row.status ?? "unknown";
+    totalSignalsByStatus[status] = (totalSignalsByStatus[status] ?? 0) + Number(row.count ?? 0);
+  }
+
+  return (
+    <div style={{ background: "var(--bg-panel)" }}>
+      <div className="px-4 py-3">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "var(--accent-green)" }}>
+            System Diagnostics
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAutoRefresh(p => !p)}
+              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
+              style={{
+                borderColor: autoRefresh ? "#166534" : "var(--border-color)",
+                color: autoRefresh ? "var(--accent-green)" : "var(--text-muted)",
+                background: autoRefresh ? "var(--accent-green-dim)" : "transparent",
+              }}
+            >
+              {autoRefresh ? "Auto 15s" : "Paused"}
+            </button>
+            <button
+              onClick={fetchDiag}
+              className="text-[8px] uppercase tracking-wider px-2 py-0.5 rounded border"
+              style={{ borderColor: "var(--border-color)", color: "var(--accent-green)", background: "transparent" }}
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Row 1: System Health + WebSocket + Cache */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <DiagSection title="System Health">
+            <DiagRow label="Uptime" value={sys.uptimeFormatted ?? "—"} />
+            <DiagRow label="Scan cycles" value={String(sys.scanCount ?? 0)} />
+            <DiagRow
+              label="Last scan"
+              value={scanAge !== null ? `${scanAge}s ago` : "never"}
+              color={scanHealthy ? "var(--accent-green)" : "var(--accent-red)"}
+            />
+            <DiagRow label="Market" value={sys.marketOpen ? "OPEN" : "CLOSED"} color={sys.marketOpen ? "var(--accent-green)" : "var(--text-muted)"} />
+            <DiagRow label="Pass rate" value={`${sys.filterPassRate ?? 0}%`} sub={`${sys.lastScanPassedFilter ?? 0} / ${sys.lastScanCandidates ?? 0}`} />
+          </DiagSection>
+
+          <DiagSection title="WebSocket Streams">
+            <DiagRow
+              label="Crypto"
+              value={(ws.crypto ?? "—").toUpperCase()}
+              color={ws.crypto === "connected" ? "var(--accent-green)" : ws.crypto === "suspended" ? "var(--accent-amber)" : "var(--accent-red)"}
+            />
+            <DiagRow
+              label="Stocks"
+              value={(ws.stock ?? "—").toUpperCase()}
+              color={ws.stock === "connected" ? "var(--accent-green)" : ws.stock === "suspended" ? "var(--accent-amber)" : "var(--accent-red)"}
+            />
+            <DiagRow label="Price count" value={String(ws.priceCount ?? 0)} />
+            {ws.crypto === "suspended" && (
+              <div className="text-[8px] mt-1 px-1 py-0.5 rounded" style={{ background: "rgba(205,166,97,0.1)", color: "var(--accent-amber)" }}>
+                WS suspended — using REST fallback
+              </div>
+            )}
+          </DiagSection>
+
+          <DiagSection title="Data Cache">
+            <DiagRow label="Entries" value={String(cache.totalEntries ?? 0)} />
+            <DiagRow label="Hit rate" value={cache.hitRate != null ? `${cache.hitRate}%` : "—"} />
+            <DiagRow label="Stale" value={String(cache.staleEntries ?? 0)} color={Number(cache.staleEntries ?? 0) > 10 ? "var(--accent-amber)" : undefined} />
+          </DiagSection>
+        </div>
+
+        {/* Row 2: Pipeline Summary + Scanner + Orders */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <DiagSection title="Pipeline (Last Cycle)">
+            <DiagRow label="Symbols scanned" value={String(pipe.symbolsScanned ?? 0)} sub={`${pipe.cryptoCount ?? 0}C / ${pipe.equityCount ?? 0}E`} />
+            <DiagRow label="Raw candidates" value={String(pipe.rawCandidates ?? 0)} />
+            <DiagRow label="Quality passed" value={String(pipe.qualityPassed ?? 0)} color="var(--accent-green)" />
+            <DiagRow label="Quality rejected" value={String(pipe.qualityRejected ?? 0)} color={(pipe.qualityRejected ?? 0) > 0 ? "var(--accent-red)" : undefined} />
+            <DiagRow label="Dedup skipped" value={String(pipe.dedupSkipped ?? 0)} />
+            <DiagRow label="New signals" value={String(pipe.newSignalsSaved ?? 0)} color="var(--accent-green)" />
+            <DiagRow label="Orders placed" value={String(pipe.ordersPlaced ?? 0)} color="var(--accent-green)" />
+            <DiagRow label="Paper only" value={String(pipe.paperOnlyCount ?? 0)} />
+            <DiagRow label="Last updated" value={pipe.lastUpdatedAgo != null ? `${pipe.lastUpdatedAgo}s ago` : "—"} />
+          </DiagSection>
+
+          <DiagSection title={`Scanner (${scanner.totalSlots ?? 0} slots)`}>
+            <DiagRow label="Due now" value={String(scanner.dueNow ?? 0)} color={(scanner.dueNow ?? 0) > 0 ? "var(--accent-amber)" : undefined} />
+            {Object.entries(scanner.phaseDistribution ?? {}).map(([phase, count]) => (
+              <DiagRow
+                key={phase}
+                label={phase.replace(/_/g, " ")}
+                value={String(count)}
+                color={
+                  phase === "D_APPROACHING" ? "var(--accent-red)"
+                    : phase === "CD_PROJECTED" ? "var(--accent-green)"
+                    : phase === "BC_FORMING" ? "var(--accent-amber)"
+                    : undefined
+                }
+              />
+            ))}
+            {(scanner.overdueScanners ?? []).length > 0 && (
+              <div className="mt-1">
+                <div className="text-[8px] font-semibold mb-1" style={{ color: "var(--accent-red)" }}>
+                  OVERDUE ({scanner.overdueScanners.length})
+                </div>
+                {(scanner.overdueScanners as any[]).slice(0, 5).map((s: any, i: number) => (
+                  <div key={i} className="text-[8px]" style={{ color: "var(--accent-red)" }}>
+                    {s.symbol} {s.timeframe} — {s.overdueMinutes}m late
+                  </div>
+                ))}
+              </div>
+            )}
+          </DiagSection>
+
+          <DiagSection title={`Open Orders (${orders.total ?? 0})`}>
+            <DiagRow label="Buy orders" value={String(orders.buy ?? 0)} color="var(--accent-green)" />
+            <DiagRow label="Sell orders" value={String(orders.sell ?? 0)} color="var(--accent-red)" />
+            <DiagRow label="Total notional" value={`$${(orders.totalNotional ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+            {acct && (
+              <>
+                <div className="mt-1 pt-1" style={{ borderTop: "0.5px solid var(--border-color)" }}>
+                  <DiagRow label="Equity" value={`$${acct.equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                  <DiagRow label="Buying power" value={`$${acct.buyingPower.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                  <DiagRow label="Cash" value={`$${acct.cash.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                </div>
+              </>
+            )}
+          </DiagSection>
+        </div>
+
+        {/* Row 3: Signal Breakdown + Stale Signals + Orders Table */}
+        <div className="grid grid-cols-3 gap-2">
+          <DiagSection title="Signal Summary">
+            {Object.entries(totalSignalsByStatus).map(([status, count]) => (
+              <DiagRow
+                key={status}
+                label={status}
+                value={String(count)}
+                color={
+                  status === "filled" ? "var(--accent-green)"
+                    : status === "closed" ? "var(--text-muted)"
+                    : status === "pending" ? "var(--accent-amber)"
+                    : status === "paper_only" ? "var(--accent-amber)"
+                    : undefined
+                }
+              />
+            ))}
+            <div className="mt-1 pt-1" style={{ borderTop: "0.5px solid var(--border-color)" }}>
+              <div className="text-[8px] font-semibold mb-1" style={{ color: "var(--text-muted)" }}>BY ASSET CLASS</div>
+              {signalSummary.map((row: any, i: number) => (
+                <div key={i} className="flex justify-between text-[9px] py-px">
+                  <span style={{ color: "var(--text-muted)" }}>
+                    {row.asset_class} {(row.direction ?? "").toUpperCase()} {row.status}
+                  </span>
+                  <span style={{ color: "white" }}>{row.count}</span>
+                </div>
+              ))}
+            </div>
+          </DiagSection>
+
+          <DiagSection title={`Stale Signals (${staleSignals.length})`}>
+            {staleSignals.length === 0 ? (
+              <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>No stale signals (48h+)</div>
+            ) : (
+              staleSignals.map((s: any, i: number) => (
+                <div key={i} className="flex justify-between text-[9px] py-px">
+                  <span style={{ color: "var(--accent-amber)" }}>{s.symbol}</span>
+                  <span style={{ color: "var(--text-muted)" }}>{s.status}</span>
+                  <span style={{ color: "var(--text-muted)" }}>
+                    {s.created_at ? dateShort(s.created_at) : "—"}
+                  </span>
+                </div>
+              ))
+            )}
+          </DiagSection>
+
+          <DiagSection title="Recent Orders">
+            {(orders.orders ?? []).length === 0 ? (
+              <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>No open orders</div>
+            ) : (
+              <div className="space-y-0.5">
+                {(orders.orders as any[]).slice(0, 10).map((o: any, i: number) => (
+                  <div key={i} className="flex items-center gap-1 text-[9px]">
+                    <span
+                      className="px-1 py-px rounded text-[8px] font-bold uppercase"
+                      style={{
+                        background: o.side === "buy" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                        color: o.side === "buy" ? "var(--accent-green)" : "var(--accent-red)",
+                      }}
+                    >
+                      {o.side}
+                    </span>
+                    <span style={{ color: "white" }}>{o.symbol}</span>
+                    <span style={{ color: "var(--text-muted)" }}>{o.qty}</span>
+                    <span style={{ color: "var(--text-muted)" }}>@ {o.limitPrice ?? "mkt"}</span>
+                    {o.ageMinutes != null && (
+                      <span className="ml-auto" style={{ color: o.ageMinutes > 1440 ? "var(--accent-amber)" : "var(--text-muted)" }}>
+                        {o.ageMinutes > 1440 ? `${Math.floor(o.ageMinutes / 1440)}d` : o.ageMinutes > 60 ? `${Math.floor(o.ageMinutes / 60)}h` : `${o.ageMinutes}m`}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </DiagSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DiagSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-md p-2" style={{ background: "var(--bg-main)", border: "0.5px solid var(--border-color)" }}>
+      <div className="text-[8px] uppercase tracking-wider font-semibold mb-1.5" style={{ color: "var(--text-muted)" }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function DiagRow({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
+  return (
+    <div className="flex justify-between items-baseline py-px">
+      <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{label}</span>
+      <div className="flex items-baseline gap-1">
+        {sub && <span className="text-[8px]" style={{ color: "var(--text-muted)", opacity: 0.6 }}>{sub}</span>}
+        <span className="text-[9px] font-semibold" style={{ color: color ?? "white" }}>{value}</span>
       </div>
     </div>
   );
