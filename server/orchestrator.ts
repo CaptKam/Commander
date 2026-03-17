@@ -23,7 +23,7 @@ import { selectBestSignals } from "./signal-ranker";
 import { getSymbolsDueForScan, updateScanState, initializeScanStates, getScanStateStats } from "./scan-scheduler";
 import { db, ensureTablesExist } from "./db";
 import { liveSignals, insertLiveSignalSchema, watchlist, systemSettings } from "../shared/schema";
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 
 // ============================================================
 // Scan interval and heartbeat configuration
@@ -718,6 +718,101 @@ async function runScanCycle(): Promise<void> {
       } catch {
         // Silent — outranked signal logging is best-effort
       }
+    }
+
+    // ============================================================
+    // CATCH-UP: Place orders for pending signals that have no order yet
+    // Handles equity signals saved during off-hours + any crypto longs
+    // that were saved but missed order placement for any reason.
+    // ============================================================
+    try {
+      const marketOpen = isStockMarketOpen();
+      const pendingNoOrder = await db
+        .select()
+        .from(liveSignals)
+        .where(
+          and(
+            eq(liveSignals.status, "pending"),
+            isNull(liveSignals.entryOrderId),
+          ),
+        )
+        .limit(20);
+
+      if (pendingNoOrder.length > 0) {
+        const equityData = await getAccountEquity();
+        const catchupEquity = equityData?.equity ?? null;
+        const catchupBp = equityData?.buyingPower ?? null;
+
+        let placed = 0;
+        let skipped = 0;
+        for (const sig of pendingNoOrder) {
+          try {
+            const isCrypto = sig.symbol.includes("/");
+
+            if (isCrypto && sig.direction === "short") {
+              await db.update(liveSignals).set({ status: "paper_only" }).where(eq(liveSignals.id, sig.id));
+              skipped++;
+              continue;
+            }
+
+            if (!isCrypto && !marketOpen) {
+              skipped++;
+              continue;
+            }
+
+            if (!settings.tradingEnabled) {
+              skipped++;
+              continue;
+            }
+
+            if (catchupEquity === null) {
+              skipped++;
+              continue;
+            }
+
+            const allocation = isCrypto ? settings.cryptoAllocation : settings.equityAllocation;
+            const notional = catchupEquity * allocation;
+            if (catchupBp !== null && notional > catchupBp) {
+              console.warn(`[Catchup] Skipping ${sig.symbol}: notional $${notional.toFixed(2)} > BP $${catchupBp.toFixed(2)}`);
+              skipped++;
+              continue;
+            }
+
+            const pseudoSignal = {
+              symbol: sig.symbol,
+              pattern: sig.patternType as any,
+              timeframe: sig.timeframe as any,
+              direction: sig.direction as any,
+              limitPrice: Number(sig.entryPrice),
+              stopLossPrice: Number(sig.stopLossPrice),
+              tp1Price: Number(sig.tp1Price),
+              tp2Price: Number(sig.tp2Price),
+              xPrice: Number(sig.xPrice ?? 0),
+              aPrice: Number(sig.aPrice ?? 0),
+              bPrice: Number(sig.bPrice ?? 0),
+              cPrice: Number(sig.cPrice ?? 0),
+            };
+
+            const order = await placePhaseCLimitOrder(pseudoSignal as any, catchupEquity, isCrypto, {
+              equity: settings.equityAllocation,
+              crypto: settings.cryptoAllocation,
+            }, catchupBp ?? undefined);
+
+            await db.update(liveSignals)
+              .set({ entryOrderId: order.id })
+              .where(eq(liveSignals.id, sig.id));
+            placed++;
+            console.log(`[Catchup] Order placed for ${sig.symbol} ${sig.patternType} ${sig.direction} (id=${order.id})`);
+          } catch (err) {
+            console.error(`[Catchup] Failed to place order for ${sig.symbol}:`, err);
+          }
+        }
+        if (placed > 0 || pendingNoOrder.length > 0) {
+          console.log(`[Catchup] ${placed} orders placed, ${skipped} skipped, ${pendingNoOrder.length} total pending without orders`);
+        }
+      }
+    } catch (err) {
+      console.error("[Catchup] Catch-up cycle failed:", err);
     }
 
     const elapsed = Date.now() - cycleStart;
