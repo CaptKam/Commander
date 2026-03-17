@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Settings,
   Power,
@@ -10,6 +10,7 @@ import {
   Radar,
   Stethoscope,
   Radio,
+  BarChart3,
 } from "lucide-react";
 
 // ============================================================
@@ -194,36 +195,6 @@ interface WatchlistItem {
   assetClass: string;
 }
 
-interface SignalPipelineEntry {
-  id: number;
-  symbol: string;
-  pattern: string;
-  timeframe: string;
-  direction: string;
-  status: string;
-  stage: string;
-  stageDetail: string;
-  stageColor: string;
-  entryPrice: number | null;
-  stopLoss: number | null;
-  tp1: number | null;
-  tp2: number | null;
-  score: number | null;
-  entryOrderId: string | null;
-  hasOrder: boolean;
-  detectedAt: string;
-  filledAt: string | null;
-  blockedReason: string | null;
-}
-
-interface SignalPipelineData {
-  signals: SignalPipelineEntry[];
-  summary: {
-    total: number;
-    byStage: Record<string, number>;
-  };
-}
-
 // ============================================================
 // Constants & helpers
 // ============================================================
@@ -271,8 +242,20 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [blotterSort, setBlotterSort] = useState<"pnl" | "symbol" | "pct">("pnl");
-  const [activePage, setActivePage] = useState<"dashboard" | "pipeline" | "scanner" | "diagnostics" | "feed" | "signals">("dashboard");
+  const [activePage, setActivePage] = useState<"dashboard" | "pipeline" | "scanner" | "diagnostics" | "feed" | "signals" | "trade">("dashboard");
   const [signalPipeline, setSignalPipeline] = useState<SignalPipelineData | null>(null);
+  const [bottomTab, setBottomTab] = useState<"feed" | "signals" | "pipeline" | "scanner">("feed");
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [selectedSignalId, setSelectedSignalId] = useState<number | null>(null);
+  const [chartTimeframe, setChartTimeframe] = useState<"4H" | "1D">("4H");
+
+  // Helper: open trade page for a symbol
+  const openChart = useCallback((symbol: string, signalId?: number | null, timeframe?: "4H" | "1D") => {
+    setSelectedSymbol(symbol);
+    setSelectedSignalId(signalId ?? null);
+    if (timeframe) setChartTimeframe(timeframe);
+    setActivePage("trade");
+  }, []);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -496,6 +479,7 @@ export default function App() {
         <nav className="shrink-0 flex flex-col items-center py-2 gap-1 border-r" style={{ width: 52, borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
           {([
             { key: "dashboard" as const, icon: LayoutDashboard, label: "Dashboard" },
+            { key: "trade" as const, icon: BarChart3, label: "Trade" },
             { key: "feed" as const, icon: Radio, label: "Feed" },
             { key: "signals" as const, icon: Zap, label: "Signals" },
             { key: "pipeline" as const, icon: Activity, label: "Pipeline" },
@@ -575,7 +559,7 @@ export default function App() {
                         style={{ borderColor: "rgba(255,255,255,0.03)" }}
                       >
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-white font-semibold truncate">{p.symbol}</span>
+                          <span className="text-white font-semibold truncate cursor-pointer hover:underline" style={{ color: "var(--accent-green)" }} onClick={() => openChart(p.symbol)}>{p.symbol}</span>
                           {p.pattern && <span className="text-[9px] truncate" style={{ color: "var(--accent-amber)" }}>{p.pattern}</span>}
                         </div>
                         <div>
@@ -615,9 +599,68 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {/* BOTTOM PANEL — tabbed: Feed | Signals | Pipeline | Scanner */}
+                <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
+                  <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
+                    {([
+                      { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
+                      { key: "signals" as const, label: "Signals", badge: signalPipeline ? String(signalPipeline.summary.total) : undefined },
+                      { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
+                      { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
+                    ]).map((tab) => (
+                      <button
+                        key={tab.key}
+                        onClick={() => setBottomTab(tab.key)}
+                        className="flex items-center gap-1.5 px-3 h-7 text-[9px] uppercase tracking-widest font-semibold border-b-2"
+                        style={{
+                          borderColor: bottomTab === tab.key ? "var(--accent-green)" : "transparent",
+                          color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
+                          background: "transparent",
+                        }}
+                      >
+                        {tab.label}
+                        {tab.badge && (
+                          <span className="text-[8px] px-1 py-px rounded" style={{
+                            background: bottomTab === tab.key ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
+                            color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
+                          }}>
+                            {tab.badge}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                    {bottomTab === "feed" && (
+                      <div className="px-3 py-2">
+                        {feed.slice(0, 30).map((e, i) => (
+                          <div key={i} className="flex items-start gap-2 py-0.5 leading-tight">
+                            <span className="shrink-0 text-[9px] tabular-nums" style={{ color: "var(--text-muted)", opacity: 0.5 }}>{ts(e.time)}</span>
+                            <span className="shrink-0 text-[8px] px-1 py-px rounded font-semibold uppercase" style={{
+                              background: e.tag === "FILL" ? "var(--accent-green-dim)" : e.tag === "NEAR" ? "rgba(205,166,97,0.15)" : e.tag === "CLOSED" ? "rgba(122,136,145,0.15)" : "rgba(205,166,97,0.15)",
+                              color: e.tag === "FILL" ? "var(--accent-green)" : e.tag === "NEAR" ? "var(--accent-amber)" : e.tag === "CLOSED" ? "var(--text-muted)" : "var(--accent-amber)",
+                            }}>{e.tag}</span>
+                            <span className="text-[10px]" style={{ color: e.color }}>{e.text}</span>
+                          </div>
+                        ))}
+                        {feed.length === 0 && <div className="py-4 text-center" style={{ color: "var(--text-muted)" }}>Awaiting events...</div>}
+                      </div>
+                    )}
+                    {bottomTab === "signals" && (
+                      <SignalPipelineView data={signalPipeline} onSymbolClick={(sym, id, tf) => openChart(sym, id, tf as "4H" | "1D")} />
+                    )}
+                    {bottomTab === "pipeline" && (
+                      <ScanPipeline data={pipeline} />
+                    )}
+                    {bottomTab === "scanner" && (
+                      <ScanStateView data={scanState} onSymbolClick={(sym) => openChart(sym)} />
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* RIGHT SIDEBAR — risk, stats, alerts */}
+              {/* RIGHT SIDEBAR — risk, stats, alerts, recent fills */}
               <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
                 <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
                   <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
@@ -627,22 +670,13 @@ export default function App() {
                   <div className="mt-2">
                     <div className="flex justify-between text-[10px] mb-0.5">
                       <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
-                      <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                        {lockedPct.toFixed(0)}%
-                      </span>
+                      <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>{lockedPct.toFixed(0)}%</span>
                     </div>
                     <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${Math.min(lockedPct, 100)}%`,
-                          background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
-                        }}
-                      />
+                      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(lockedPct, 100)}%`, background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }} />
                     </div>
                   </div>
                 </div>
-
                 <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
                   <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
                   <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
@@ -652,135 +686,32 @@ export default function App() {
                   <Row label="Signals" value={String(signals.length)} />
                   <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
                 </div>
-
-          {/* BOTTOM PANEL — tabbed: Feed | Pipeline | Scanner */}
-          <div className="shrink-0 flex flex-col overflow-hidden" style={{ height: "40%" }}>
-            {/* Tab bar */}
-            <div className="shrink-0 flex items-center gap-0 border-t border-b" style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}>
-              {([
-                { key: "feed" as const, label: "Live Feed", badge: feed.length > 0 ? String(feed.length) : undefined },
-                { key: "signals" as const, label: "Signals", badge: signalPipeline ? String(signalPipeline.summary.total) : undefined },
-                { key: "pipeline" as const, label: "Pipeline", badge: pipeline?.lastUpdatedAgo != null ? `${pipeline.lastUpdatedAgo}s` : undefined },
-                { key: "scanner" as const, label: "Scanner", badge: scanState && scanState.hotSymbols.length > 0 ? `${scanState.hotSymbols.length} hot` : undefined },
-              ]).map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setBottomTab(tab.key)}
-                  className="flex items-center gap-1.5 px-3 h-7 text-[9px] uppercase tracking-widest font-semibold border-b-2"
-                  style={{
-                    borderColor: bottomTab === tab.key ? "var(--accent-green)" : "transparent",
-                    color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
-                    background: "transparent",
-                  }}
-                >
-                  {tab.label}
-                  {tab.badge && (
-                    <span className="text-[8px] px-1 py-px rounded" style={{
-                      background: bottomTab === tab.key ? "var(--accent-green-dim)" : "rgba(255,255,255,0.05)",
-                      color: bottomTab === tab.key ? "var(--accent-green)" : "var(--text-muted)",
-                    }}>
-                      {tab.badge}
-                    </span>
-                  )}
-                </div>
-
                 <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
                   <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Alerts</div>
                   {alerts.map((a, i) => (
                     <div key={i} className="flex items-center gap-2 py-0.5">
-                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{
-                        background: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)",
-                      }} />
-                      <span style={{ color: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                        {a.text}
-                      </span>
+                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }} />
+                      <span style={{ color: a.level === "red" ? "var(--accent-red)" : a.level === "amber" ? "var(--accent-amber)" : "var(--accent-green)" }}>{a.text}</span>
                     </div>
                   ))}
                 </div>
-
                 <div className="px-3 py-3 flex-1">
-                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-                    Recent Fills ({history.length})
-                  </div>
+                  <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Recent Fills ({history.length})</div>
                   {history.slice(0, 10).map((t, i) => (
                     <div key={i} className="flex items-center justify-between py-0.5">
                       <div className="flex items-center gap-1.5 min-w-0">
-                        <span
-                          className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0"
-                          style={{
-                            background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
-                            color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
-                          }}
-                        >
-                          {t.direction === "long" ? "L" : "S"}
-                        </span>
-                        <span className="text-white truncate">{t.symbol}</span>
+                        <span className="text-[9px] px-1 py-px rounded uppercase font-semibold shrink-0" style={{ background: t.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)", color: t.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>{t.direction === "long" ? "L" : "S"}</span>
+                        <span className="text-white truncate cursor-pointer hover:underline" style={{ color: "var(--accent-green)" }} onClick={() => openChart(t.symbol)}>{t.symbol}</span>
                         <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{t.pattern}</span>
                       </div>
-                      <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>
-                        {dateShort(t.filled_at)}
-                      </span>
+                      <span className="text-[9px] shrink-0" style={{ color: "var(--text-muted)" }}>{dateShort(t.filled_at)}</span>
                     </div>
                   ))}
-                  {history.length === 0 && (
-                    <div style={{ color: "var(--text-muted)" }}>No fills yet</div>
-                  )}
+                  {history.length === 0 && <div style={{ color: "var(--text-muted)" }}>No fills yet</div>}
                 </div>
-              )}
-
-              {bottomTab === "signals" && (
-                <SignalPipelineView data={signalPipeline} />
-              )}
-
-              {bottomTab === "pipeline" && (
-                <ScanPipeline data={pipeline} />
-              )}
-
-              {bottomTab === "scanner" && (
-                <ScanStateView data={scanState} />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT SIDEBAR (30%) — risk, stats, alerts */}
-        <aside className="w-64 shrink-0 flex flex-col overflow-y-auto" style={{ background: "var(--bg-panel)" }}>
-
-          {/* RISK */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Risk</div>
-            <Row label="Equity" value={fmt(equity)} />
-            <Row label="Buying Power" value={fmt(bp)} />
-            <Row label="Cash" value={fmt(account?.cash ?? bp)} />
-            <div className="mt-2">
-              <div className="flex justify-between text-[10px] mb-0.5">
-                <span style={{ color: "var(--text-muted)" }}>GTC Locked</span>
-                <span style={{ color: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
-                  {lockedPct.toFixed(0)}%
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full" style={{ background: "var(--border-color)" }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min(lockedPct, 100)}%`,
-                    background: lockedPct > 80 ? "var(--accent-red)" : lockedPct > 50 ? "var(--accent-amber)" : "var(--accent-green)",
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* STATS */}
-          <div className="px-3 py-3 border-b" style={{ borderColor: "var(--border-color)" }}>
-            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>Stats</div>
-            <Row label="Win Rate" value={metrics ? `${metrics.win_rate}%` : "—"} color="var(--accent-green)" />
-            <Row label="W / L" value={metrics ? `${metrics.wins} / ${metrics.losses}` : "—"} />
-            <Row label="Profit Factor" value={metrics ? (metrics.profit_factor == null ? "—" : metrics.profit_factor === Infinity ? "INF" : metrics.profit_factor.toFixed(2)) : "—"} />
-            <Row label="Trades" value={String(history.length)} />
-            <Row label="Signals" value={String(signals.length)} />
-            <Row label="Approaching" value={String(approaching.filter((s) => (s.distancePct ?? 0) <= 5).length)} color="var(--accent-amber)" />
-          </div>
+              </aside>
+            </>
+          )}
 
           {/* ============ FEED PAGE ============ */}
           {activePage === "feed" && (
@@ -824,7 +755,7 @@ export default function App() {
           {/* ============ SIGNALS PAGE ============ */}
           {activePage === "signals" && (
             <div className="flex-1 overflow-y-auto">
-              <SignalPipelineView data={signalPipeline} />
+              <SignalPipelineView data={signalPipeline} onSymbolClick={(sym, id, tf) => openChart(sym, id, tf as "4H" | "1D")} />
             </div>
           )}
 
@@ -838,8 +769,21 @@ export default function App() {
           {/* ============ SCANNER PAGE ============ */}
           {activePage === "scanner" && (
             <div className="flex-1 overflow-y-auto">
-              <ScanStateView data={scanState} />
+              <ScanStateView data={scanState} onSymbolClick={(sym) => openChart(sym)} />
             </div>
+          )}
+
+          {/* ============ TRADE PAGE ============ */}
+          {activePage === "trade" && (
+            <TradePage
+              symbol={selectedSymbol}
+              signalId={selectedSignalId}
+              timeframe={chartTimeframe}
+              setTimeframe={setChartTimeframe}
+              signals={signals}
+              approaching={approaching}
+              openChart={openChart}
+            />
           )}
 
           {/* ============ DIAGNOSTICS PAGE ============ */}
@@ -881,7 +825,7 @@ function relativeTime(iso: string): string {
   return `${Math.floor(ms / 86400_000)}d ago`;
 }
 
-function SignalPipelineView({ data }: { data: SignalPipelineData | null }) {
+function SignalPipelineView({ data, onSymbolClick }: { data: SignalPipelineData | null; onSymbolClick?: (symbol: string, signalId: number, timeframe: string) => void }) {
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"time" | "score" | "symbol">("time");
 
@@ -988,7 +932,7 @@ function SignalPipelineView({ data }: { data: SignalPipelineData | null }) {
                   className="border-b"
                   style={{ borderColor: "var(--border-color)" }}
                 >
-                  <td className="px-2 py-1.5 font-semibold" style={{ color: "white" }}>{s.symbol}</td>
+                  <td className="px-2 py-1.5 font-semibold cursor-pointer hover:underline" style={{ color: "var(--accent-green)" }} onClick={() => onSymbolClick?.(s.symbol, s.id, s.timeframe)}>{s.symbol}</td>
                   <td className="px-2 py-1.5" style={{ color: "var(--text-muted)" }}>
                     {s.pattern} {s.timeframe}
                   </td>
@@ -1333,7 +1277,7 @@ const PHASE_COLORS: Record<string, string> = {
 
 const PHASE_ORDER = ["NO_PATTERN", "XA_FORMING", "AB_FORMING", "BC_FORMING", "CD_PROJECTED", "D_APPROACHING"];
 
-function ScanStateView({ data }: { data: ScanStateData | null }) {
+function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; onSymbolClick?: (symbol: string) => void }) {
   const [refreshing, setRefreshing] = useState(false);
   if (!data || data.total === 0) return null;
 
@@ -1444,11 +1388,11 @@ function ScanStateView({ data }: { data: ScanStateData | null }) {
                       FAV
                     </span>
                   )}
-                  <span className="text-[10px] font-bold" style={{
+                  <span className="text-[10px] font-bold cursor-pointer hover:underline" style={{
                     color: s.phase === "D_APPROACHING" ? "var(--accent-red)" : "var(--accent-green)",
                     fontFamily: "'JetBrains Mono', monospace",
                     minWidth: 70,
-                  }}>
+                  }} onClick={() => onSymbolClick?.(s.symbol)}>
                     {s.symbol}
                   </span>
                   <span className="text-[9px] px-1 py-px rounded" style={{
@@ -1800,6 +1744,567 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
     <div className="flex justify-between py-0.5">
       <span style={{ color: "var(--text-muted)" }}>{label}</span>
       <span className="font-semibold" style={{ color: color || "white" }}>{value}</span>
+    </div>
+  );
+}
+
+// ============================================================
+// Trade Page — full chart + trade panel
+// ============================================================
+function TradePage({
+  symbol,
+  signalId,
+  timeframe,
+  setTimeframe,
+  signals,
+  approaching,
+  openChart,
+}: {
+  symbol: string | null;
+  signalId: number | null;
+  timeframe: "4H" | "1D";
+  setTimeframe: (tf: "4H" | "1D") => void;
+  signals: Signal[];
+  approaching: ApproachingSignal[];
+  openChart: (symbol: string, signalId?: number | null, timeframe?: "4H" | "1D") => void;
+}) {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<any>(null);
+
+  const [candles, setCandles] = useState<any[]>([]);
+  const [signal, setSignal] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [orderResult, setOrderResult] = useState<string | null>(null);
+
+  // Fetch candle data when symbol or timeframe changes
+  useEffect(() => {
+    if (!symbol) return;
+    setLoading(true);
+    setOrderResult(null);
+
+    fetch(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${timeframe}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setCandles(data.candles || []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [symbol, timeframe]);
+
+  // Fetch signal details
+  useEffect(() => {
+    if (!signalId) {
+      setSignal(null);
+      return;
+    }
+    fetch(`/api/signal/${signalId}`)
+      .then((r) => r.json())
+      .then(setSignal)
+      .catch(() => setSignal(null));
+  }, [signalId]);
+
+  // Also try to find signal from approaching data if no signalId
+  useEffect(() => {
+    if (signalId || !symbol) return;
+    const match = approaching.find((a) => a.symbol === symbol);
+    if (match) {
+      setSignal({
+        entryPrice: String(match.projectedD),
+        stopLossPrice: String(match.sl),
+        tp1Price: String(match.tp1),
+        tp2Price: String(match.tp2),
+        xPrice: match.x != null ? String(match.x) : null,
+        aPrice: match.a != null ? String(match.a) : null,
+        bPrice: match.b != null ? String(match.b) : null,
+        cPrice: match.c != null ? String(match.c) : null,
+        patternType: match.pattern,
+        direction: match.direction,
+        timeframe: match.timeframe,
+        status: "approaching",
+        score: null,
+      });
+    }
+  }, [signalId, symbol, approaching]);
+
+  // Render chart
+  useEffect(() => {
+    if (!chartContainerRef.current || candles.length === 0) return;
+
+    // Dynamic import
+    import("lightweight-charts").then(({ createChart, ColorType, LineStyle }) => {
+      // Clean up previous
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.remove();
+        chartInstanceRef.current = null;
+      }
+
+      const container = chartContainerRef.current!;
+      const chart = createChart(container, {
+        width: container.clientWidth,
+        height: container.clientHeight,
+        layout: {
+          background: { type: ColorType.Solid, color: "#0a0e0a" },
+          textColor: "#7a8891",
+          fontSize: 11,
+          fontFamily: "'JetBrains Mono', monospace",
+        },
+        grid: {
+          vertLines: { color: "#1a2e1a" },
+          horzLines: { color: "#1a2e1a" },
+        },
+        crosshair: {
+          mode: 0,
+        },
+        rightPriceScale: {
+          borderColor: "#273136",
+          scaleMargins: { top: 0.1, bottom: 0.1 },
+        },
+        timeScale: {
+          borderColor: "#273136",
+          timeVisible: true,
+          secondsVisible: false,
+        },
+      });
+
+      chartInstanceRef.current = chart;
+
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: "#22c55e",
+        downColor: "#ef4444",
+        borderDownColor: "#ef4444",
+        borderUpColor: "#22c55e",
+        wickDownColor: "#ef4444",
+        wickUpColor: "#22c55e",
+      });
+
+      candleSeries.setData(candles);
+
+      // Add overlay lines if we have signal data
+      if (signal) {
+        const entryPrice = Number(signal.entryPrice);
+        const slPrice = Number(signal.stopLossPrice);
+        const tp1Price = Number(signal.tp1Price);
+        const tp2Price = Number(signal.tp2Price);
+
+        if (entryPrice > 0) {
+          candleSeries.createPriceLine({
+            price: entryPrice,
+            color: "#eab308",
+            lineWidth: 2,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "Entry (D)",
+          });
+        }
+        if (slPrice > 0) {
+          candleSeries.createPriceLine({
+            price: slPrice,
+            color: "#ef4444",
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "SL",
+          });
+        }
+        if (tp1Price > 0) {
+          candleSeries.createPriceLine({
+            price: tp1Price,
+            color: "#22c55e",
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "TP1",
+          });
+        }
+        if (tp2Price > 0) {
+          candleSeries.createPriceLine({
+            price: tp2Price,
+            color: "#4ade80",
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "TP2",
+          });
+        }
+
+        // XABCD pattern points as purple dotted lines
+        const points = [
+          { label: "X", price: Number(signal.xPrice) },
+          { label: "A", price: Number(signal.aPrice) },
+          { label: "B", price: Number(signal.bPrice) },
+          { label: "C", price: Number(signal.cPrice) },
+        ];
+        for (const pt of points) {
+          if (pt.price > 0) {
+            candleSeries.createPriceLine({
+              price: pt.price,
+              color: "#8b5cf6",
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: pt.label,
+            });
+          }
+        }
+      }
+
+      chart.timeScale().fitContent();
+
+      // Resize observer
+      const observer = new ResizeObserver(() => {
+        if (chartInstanceRef.current) {
+          chart.applyOptions({
+            width: container.clientWidth,
+            height: container.clientHeight,
+          });
+        }
+      });
+      observer.observe(container);
+
+      return () => {
+        observer.disconnect();
+      };
+    });
+
+    return () => {
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.remove();
+        chartInstanceRef.current = null;
+      }
+    };
+  }, [candles, signal]);
+
+  if (!symbol) {
+    // No symbol selected — show a symbol picker from recent signals
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center" style={{ color: "var(--text-muted)" }}>
+        <BarChart3 className="w-16 h-16 mb-4 opacity-20" />
+        <p className="text-sm mb-1" style={{ color: "var(--text-main)" }}>No symbol selected</p>
+        <p className="text-xs mb-6 opacity-60">Click any symbol in Signals, Feed, or the table below</p>
+        {signals.length > 0 && (
+          <div className="w-80">
+            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+              Recent Signals
+            </div>
+            {signals.slice(0, 8).map((s) => (
+              <button
+                key={s.id}
+                onClick={() => openChart(s.symbol, s.id, s.timeframe as "4H" | "1D")}
+                className="w-full flex items-center gap-2 px-3 py-1.5 rounded mb-1 text-left hover:opacity-80"
+                style={{ background: "var(--bg-panel)", border: "1px solid var(--border-color)" }}
+              >
+                <span className="font-semibold" style={{ color: "var(--accent-green)" }}>{s.symbol}</span>
+                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{s.patternType}</span>
+                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>{s.timeframe}</span>
+                <span
+                  className="text-[8px] px-1 py-px rounded uppercase font-semibold ml-auto"
+                  style={{
+                    background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                    color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                  }}
+                >
+                  {s.direction}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 flex overflow-hidden">
+      {/* CHART AREA */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Chart header */}
+        <div
+          className="shrink-0 flex items-center justify-between px-4 h-10 border-b"
+          style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-bold text-white">{symbol}</span>
+            {signal && (
+              <>
+                <span
+                  className="text-[9px] px-1.5 py-0.5 rounded uppercase font-semibold"
+                  style={{
+                    background: signal.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                    color: signal.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                  }}
+                >
+                  {signal.direction}
+                </span>
+                <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                  {signal.patternType} {signal.timeframe}
+                </span>
+                {signal.score != null && (
+                  <span
+                    className="text-[9px] px-1.5 py-0.5 rounded"
+                    style={{ background: "var(--accent-green-dim)", color: "var(--accent-green)" }}
+                  >
+                    Score {Number(signal.score).toFixed(1)}
+                  </span>
+                )}
+                <span
+                  className="text-[9px] px-1.5 py-0.5 rounded"
+                  style={{ background: "rgba(234,179,8,0.15)", color: "#eab308" }}
+                >
+                  {signal.status}
+                </span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {(["4H", "1D"] as const).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                className="px-3 py-1 text-[10px] rounded font-semibold"
+                style={{
+                  background: timeframe === tf ? "var(--accent-green-dim)" : "transparent",
+                  color: timeframe === tf ? "var(--accent-green)" : "var(--text-muted)",
+                  border: `1px solid ${timeframe === tf ? "#166534" : "var(--border-color)"}`,
+                }}
+              >
+                {tf}
+              </button>
+            ))}
+            <a
+              href={`https://www.tradingview.com/chart/?symbol=${symbol.replace("/", "")}&interval=${timeframe === "1D" ? "D" : "240"}`}
+              target="_blank"
+              rel="noopener"
+              className="px-2 py-1 text-[10px] rounded"
+              style={{ border: "1px solid var(--border-color)", color: "var(--text-muted)" }}
+            >
+              TradingView
+            </a>
+          </div>
+        </div>
+
+        {/* Chart container */}
+        <div ref={chartContainerRef} className="flex-1 relative" style={{ minHeight: 300 }}>
+          {loading && (
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ background: "rgba(10,14,10,0.8)", color: "var(--text-muted)", zIndex: 10 }}
+            >
+              Loading chart data...
+            </div>
+          )}
+          {!loading && candles.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center" style={{ color: "var(--text-muted)" }}>
+              No candle data available for {symbol}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* TRADE PANEL — 320px right side */}
+      <div
+        className="shrink-0 flex flex-col overflow-y-auto border-l"
+        style={{ width: 320, borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
+      >
+        {/* Signal Details */}
+        {signal && (
+          <div className="p-4 border-b" style={{ borderColor: "var(--border-color)" }}>
+            <div className="text-[9px] uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--text-muted)" }}>
+              Signal Details
+            </div>
+            <div className="space-y-1.5 text-[10px]">
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>Pattern</span>
+                <span className="text-white font-semibold">{signal.patternType}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>Direction</span>
+                <span style={{ color: signal.direction === "long" ? "var(--accent-green)" : "var(--accent-red)" }}>
+                  {(signal.direction ?? "").toUpperCase()}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>Status</span>
+                <span style={{ color: "#eab308" }}>{signal.status}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>Entry (D)</span>
+                <span style={{ color: "#eab308" }}>{fmt(Number(signal.entryPrice))}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>Stop Loss</span>
+                <span style={{ color: "var(--accent-red)" }}>{fmt(Number(signal.stopLossPrice))}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>TP1</span>
+                <span style={{ color: "var(--accent-green)" }}>{fmt(Number(signal.tp1Price))}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: "var(--text-muted)" }}>TP2</span>
+                <span style={{ color: "#4ade80" }}>{fmt(Number(signal.tp2Price))}</span>
+              </div>
+              {signal.score != null && (
+                <div className="flex justify-between">
+                  <span style={{ color: "var(--text-muted)" }}>Score</span>
+                  <span style={{ color: "var(--accent-green)" }}>{Number(signal.score).toFixed(1)} / 100</span>
+                </div>
+              )}
+            </div>
+
+            {/* XABCD Points */}
+            {signal.xPrice && Number(signal.xPrice) > 0 && (
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--border-color)" }}>
+                <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+                  Pattern Points
+                </div>
+                <div className="grid grid-cols-5 gap-1 text-center text-[9px]">
+                  {(["X", "A", "B", "C", "D"] as const).map((point) => {
+                    const priceMap: Record<string, string> = {
+                      X: signal.xPrice,
+                      A: signal.aPrice,
+                      B: signal.bPrice,
+                      C: signal.cPrice,
+                      D: signal.entryPrice,
+                    };
+                    const p = Number(priceMap[point]);
+                    return (
+                      <div key={point}>
+                        <div style={{ color: "#8b5cf6" }} className="font-bold">
+                          {point}
+                        </div>
+                        <div className="text-white">{p > 0 ? fmt(p) : "—"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Order Actions */}
+        <div className="p-4 border-b" style={{ borderColor: "var(--border-color)" }}>
+          <div className="text-[9px] uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--text-muted)" }}>
+            Actions
+          </div>
+          <div className="space-y-2">
+            {/* Cancel order button */}
+            {signal?.entryOrderId && signal?.status === "pending" && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`Cancel order for ${symbol}?`)) return;
+                  try {
+                    const res = await fetch(`/api/orders/cancel/${signal.entryOrderId}`, { method: "POST" });
+                    const data = await res.json();
+                    if (data.success) {
+                      setOrderResult("Order cancelled");
+                      if (signalId) fetch(`/api/signal/${signalId}`).then((r) => r.json()).then(setSignal);
+                    } else {
+                      setOrderResult(`Error: ${data.error}`);
+                    }
+                  } catch (err: any) {
+                    setOrderResult(`Error: ${err.message}`);
+                  }
+                }}
+                className="w-full py-2 rounded text-[10px] font-semibold uppercase tracking-wider"
+                style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)", border: "1px solid rgba(127,29,29,0.5)" }}
+              >
+                Cancel Order
+              </button>
+            )}
+
+            {/* Buy / Sell buttons */}
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  const qty = prompt(`Buy quantity for ${symbol}:`);
+                  const price = prompt("Limit price:", signal ? Number(signal.entryPrice).toFixed(4) : "");
+                  if (!qty || !price) return;
+                  try {
+                    const res = await fetch("/api/orders/place", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ symbol, side: "buy", qty, limit_price: price }),
+                    });
+                    const data = await res.json();
+                    setOrderResult(data.success ? `Buy placed: ${qty} @ $${price}` : `Error: ${JSON.stringify(data.error)}`);
+                  } catch (err: any) {
+                    setOrderResult(`Error: ${err.message}`);
+                  }
+                }}
+                className="flex-1 py-2.5 rounded text-[11px] font-bold uppercase tracking-wider"
+                style={{ background: "var(--accent-green-dim)", color: "var(--accent-green)", border: "1px solid #166534" }}
+              >
+                BUY
+              </button>
+              <button
+                onClick={async () => {
+                  const qty = prompt(`Sell quantity for ${symbol}:`);
+                  const price = prompt("Limit price:");
+                  if (!qty || !price) return;
+                  try {
+                    const res = await fetch("/api/orders/place", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ symbol, side: "sell", qty, limit_price: price }),
+                    });
+                    const data = await res.json();
+                    setOrderResult(data.success ? `Sell placed: ${qty} @ $${price}` : `Error: ${JSON.stringify(data.error)}`);
+                  } catch (err: any) {
+                    setOrderResult(`Error: ${err.message}`);
+                  }
+                }}
+                className="flex-1 py-2.5 rounded text-[11px] font-bold uppercase tracking-wider"
+                style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)", border: "1px solid rgba(127,29,29,0.5)" }}
+              >
+                SELL
+              </button>
+            </div>
+
+            {/* Order result feedback */}
+            {orderResult && (
+              <div className="text-[10px] p-2 rounded" style={{ background: "var(--bg-main)", color: "var(--text-muted)" }}>
+                {orderResult}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Quick symbol list from approaching signals */}
+        {approaching.length > 0 && (
+          <div className="p-4">
+            <div className="text-[9px] uppercase tracking-widest font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
+              Approaching D ({approaching.filter((s) => (s.distancePct ?? 0) <= 10).length})
+            </div>
+            {approaching
+              .filter((s) => (s.distancePct ?? 0) <= 10)
+              .slice(0, 8)
+              .map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => openChart(s.symbol, s.id, s.timeframe as "4H" | "1D")}
+                  className="w-full flex items-center gap-2 px-2 py-1 rounded mb-0.5 text-left hover:opacity-80"
+                  style={{
+                    background: s.symbol === symbol ? "var(--accent-green-dim)" : "transparent",
+                    border: s.symbol === symbol ? "1px solid #166534" : "1px solid transparent",
+                  }}
+                >
+                  <span className="text-[10px] font-semibold" style={{ color: "var(--accent-green)" }}>
+                    {s.symbol}
+                  </span>
+                  <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                    {s.pattern} {s.timeframe}
+                  </span>
+                  <span
+                    className="text-[9px] font-bold ml-auto"
+                    style={{ color: (s.distancePct ?? 0) < 3 ? "var(--accent-red)" : "var(--accent-amber)" }}
+                  >
+                    {(s.distancePct ?? 0).toFixed(1)}%
+                  </span>
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

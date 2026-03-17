@@ -7,7 +7,7 @@ import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings, symbolScanState } from "../shared/schema";
 import { desc, eq, inArray, sql } from "drizzle-orm";
-import { getCacheStats, getLatestCachedPrice } from "./alpaca-data";
+import { getCacheStats, getLatestCachedPrice, fetchWatchlist } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
 import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen, pipelineStats } from "./orchestrator";
@@ -1240,6 +1240,141 @@ router.get("/diagnostics/full", async (_req, res) => {
 /**
  * GET /api/health — Simple health check for Render.
  */
+/**
+ * GET /api/candles/:symbol — OHLC candle data for charting.
+ * Query params: timeframe=4H|1D (default 4H)
+ * Symbol format: "AAPL" for stocks, "BTC/USD" for crypto (use BTC%2FUSD in URL).
+ */
+router.get("/candles/:symbol", async (req, res) => {
+  try {
+    const symbol = decodeURIComponent(req.params.symbol);
+    const timeframe = (req.query.timeframe as string) === "1D" ? "1D" : "4H";
+
+    const data = await fetchWatchlist([symbol], timeframe as "1D" | "4H");
+    const candles = data.get(symbol) ?? [];
+
+    if (candles.length === 0) {
+      return res.json({ candles: [], symbol, timeframe, error: "No data" });
+    }
+
+    // Format for lightweight-charts: { time, open, high, low, close }
+    const formatted = candles.map((c) => ({
+      time: Math.floor(c.timestamp / 1000),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
+    }));
+
+    // Sort ascending by time (lightweight-charts requires this)
+    formatted.sort((a, b) => a.time - b.time);
+
+    // Deduplicate by time (same timestamp = keep last)
+    const deduped = [];
+    for (let i = 0; i < formatted.length; i++) {
+      if (i === formatted.length - 1 || formatted[i].time !== formatted[i + 1].time) {
+        deduped.push(formatted[i]);
+      }
+    }
+
+    res.json({ candles: deduped, symbol, timeframe });
+  } catch (err: any) {
+    console.error("[API] /api/candles error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/signal/:id — Full signal details for chart overlay.
+ */
+router.get("/signal/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const [signal] = await db
+      .select()
+      .from(liveSignals)
+      .where(eq(liveSignals.id, id))
+      .limit(1);
+
+    if (!signal) return res.status(404).json({ error: "Signal not found" });
+    res.json(signal);
+  } catch (err: any) {
+    console.error(`[API] /api/signal/${req.params.id} error:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/orders/cancel/:orderId — Cancel an open Alpaca order.
+ */
+router.post("/orders/cancel/:orderId", async (req, res) => {
+  try {
+    const headers = alpacaHeaders();
+    if (!headers) {
+      return res.status(500).json({ error: "Alpaca keys not configured" });
+    }
+
+    const cancelRes = await fetch(`${ALPACA_BASE_URL}/v2/orders/${req.params.orderId}`, {
+      method: "DELETE",
+      headers,
+    });
+
+    if (cancelRes.ok || cancelRes.status === 204) {
+      await db
+        .update(liveSignals)
+        .set({ status: "cancelled" })
+        .where(eq(liveSignals.entryOrderId, req.params.orderId));
+      res.json({ success: true });
+    } else {
+      const body = await cancelRes.text();
+      res.status(cancelRes.status).json({ error: body });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/orders/place — Manually place a limit order on Alpaca.
+ * Body: { symbol, side, qty, limit_price, time_in_force }
+ */
+router.post("/orders/place", async (req, res) => {
+  try {
+    const headers = alpacaHeaders();
+    if (!headers) {
+      return res.status(500).json({ error: "Alpaca keys not configured" });
+    }
+
+    const { symbol, side, qty, limit_price, time_in_force } = req.body;
+    if (!symbol || !side || !qty || !limit_price) {
+      return res.status(400).json({ error: "Missing required fields: symbol, side, qty, limit_price" });
+    }
+
+    const orderRes = await fetch(`${ALPACA_BASE_URL}/v2/orders`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: symbol.replace("/", ""),
+        side,
+        qty: String(qty),
+        type: "limit",
+        time_in_force: time_in_force || "gtc",
+        limit_price: String(limit_price),
+      }),
+    });
+
+    const body = await orderRes.json();
+    if (orderRes.ok) {
+      res.json({ success: true, order: body });
+    } else {
+      res.status(orderRes.status).json({ error: body });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
