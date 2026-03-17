@@ -682,6 +682,9 @@ async function runScanCycle(): Promise<void> {
             .where(eq(liveSignals.id, inserted.id));
           console.warn(`[Orchestrator] ${signal.symbol} marked paper_only (not shortable)`);
           try { pipelineStats.ordersSkipped++; } catch {}
+        } else if (err?.insufficientBP) {
+          console.warn(`[Orchestrator] Skipping ${signal.symbol}: insufficient buying power`);
+          try { pipelineStats.ordersSkipped++; } catch {}
         } else {
           console.error(
             `[Orchestrator] Failed to execute signal ${signal.symbol}:`,
@@ -813,6 +816,10 @@ async function runScanCycle(): Promise<void> {
                 .where(eq(liveSignals.id, sig.id));
               console.warn(`[Catchup] ${sig.symbol} marked paper_only (not shortable)`);
               skipped++;
+            } else if (err?.insufficientBP) {
+              console.warn(`[Catchup] Stopping: insufficient buying power (failed on ${sig.symbol})`);
+              skipped += pendingNoOrder.length - pendingNoOrder.indexOf(sig);
+              break;
             } else {
               console.error(`[Catchup] Failed to place order for ${sig.symbol}:`, err);
             }
@@ -943,6 +950,8 @@ async function runScanCycle(): Promise<void> {
                 .set({ status: "paper_only" })
                 .where(eq(liveSignals.id, sig.id));
               console.warn(`[Orchestrator] ${sig.symbol} marked paper_only (not shortable)`);
+            } else if (err?.insufficientBP) {
+              console.warn(`[Orchestrator] Cannot promote ${sig.symbol}: insufficient buying power`);
             } else {
               console.error(`[Orchestrator] Failed to promote ${sig.symbol}:`, err);
             }

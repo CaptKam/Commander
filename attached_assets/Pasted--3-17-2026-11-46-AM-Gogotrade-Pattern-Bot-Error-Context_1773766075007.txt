@@ -1,0 +1,84 @@
+[3/17/2026 11:46 AM] Gogotrade: 🔴 Pattern Bot Error
+
+Context: Alpaca Limit Order Failed: RTXG Bat buy
+
+Error:
+Alpaca order rejected: 403 — {"buying_power":"2256.4","code":40310000,"cost_basis":"5008.92","message":"insufficient buying power"}
+
+Stack:
+Error: Alpaca order rejected: 403 — {"buying_power":"2256.4","code":40310000,"cost_basis":"5008.92","message":"insufficient buying power"}
+    at placePhaseCLimitOrder (/home/runner/workspace/server/alpaca.ts:188:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async runScanCycle (/home/runner/workspace/server/orchestrator.ts:791:27)
+
+2026-03-17T16:46:02.239Z
+[3/17/2026 11:46 AM] Gogotrade: 🔴 Pattern Bot Error
+
+Context: Alpaca Limit Order Failed: RUNN ABCD sell
+
+Error:
+Alpaca order rejected: 422 — {"code":42210000,"message":"asset \"RUNN\" cannot be sold short"}
+
+Stack:
+Error: Alpaca order rejected: 422 — {"code":42210000,"message":"asset \"RUNN\" cannot be sold short"}
+    at placePhaseCLimitOrder (/home/runner/workspace/server/alpaca.ts:188:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async runScanCycle (/home/runner/workspace/server/orchestrator.ts:791:27)
+
+2026-03-17T16:46:02.546Z
+[3/17/2026 11:46 AM] Gogotrade: 🔴 Pattern Bot Error
+
+Context: Alpaca Limit Order Failed: RUSC Butterfly buy
+
+Error:
+Alpaca order rejected: 403 — {"buying_power":"2256.4","code":40310000,"cost_basis":"4986.36","message":"insufficient buying power"}
+
+Stack:
+Error: Alpaca order rejected: 403 — {"buying_power":"2256.4","code":40310000,"cost_basis":"4986.36","message":"insufficient buying power"}
+    at placePhaseCLimitOrder (/home/runner/workspace/server/alpaca.ts:188:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async runScanCycle (/home/runner/workspace/server/orchestrator.ts:791:27)
+
+2026-03-17T16:46:02.861Z
+[3/17/2026 11:46 AM] Gogotrade: 🔴 Pattern Bot Error
+
+Context: Alpaca Limit Order Failed: RVER Butterfly sell
+
+Error:
+Alpaca order rejected: 422 — {"code":42210000,"message":"asset \"RVER\" cannot be sold short"}
+
+Stack:
+Error: Alpaca order rejected: 422 — {"code":42210000,"message":"asset \"RVER\" cannot be sold short"}
+    at placePhaseCLimitOrder (/home/runner/workspace/server/alpaca.ts:188:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async runScanCycle (/home/runner/workspace/server/orchestrator.ts:791:27)
+
+2026-03-17T16:46:03.165Z
+[3/17/2026 11:46 AM] Gogotrade: 🔴 Pattern Bot Error
+
+Context: Alpaca Limit Order Failed: RYM Butterfly sell
+
+Error:
+Alpaca order rejected: 422 — {"code":42210000,"message":"asset \"RYM\" cannot be sold short"}
+
+Stack:
+Error: Alpaca order rejected: 422 — {"code":42210000,"message":"asset \"RYM\" cannot be sold short"}
+    at placePhaseCLimitOrder (/home/runner/workspace/server/alpaca.ts:188:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async runScanCycle (/home/runner/workspace/server/orchestrator.ts:791:27)
+
+2026-03-17T16:46:03.468Z
+[3/17/2026 11:46 AM] Gogotrade: 🔴 Pattern Bot Error
+
+Context: Alpaca Limit Order Failed: SAWS Butterfly buy
+
+Error:
+Alpaca order rejected: 403 — {"buying_power":"2256.4","code":40310000,"cost_basis":"4999.28","message":"insufficient buying power"}
+
+Stack:
+Error: Alpaca order rejected: 403 — {"buying_power":"2256.4","code":40310000,"cost_basis":"4999.28","message":"insufficient buying power"}
+    at placePhaseCLimitOrder (/home/runner/workspace/server/alpaca.ts:188:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async runScanCycle (/home/runner/workspace/server/orchestrator.ts:791:27)
+
+2026-03-17T16:46:03.791Z

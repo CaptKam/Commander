@@ -200,6 +200,17 @@ export async function placePhaseCLimitOrder(
         (paperErr as any).notShortable = true;
         throw paperErr;
       }
+      if (
+        res.status === 403 &&
+        lowerBody2.includes("insufficient buying power")
+      ) {
+        console.warn(
+          `[Alpaca] Insufficient buying power for ${signal.symbol} — skipping`,
+        );
+        const bpErr = new Error(`INSUFFICIENT_BP: ${signal.symbol}`);
+        (bpErr as any).insufficientBP = true;
+        throw bpErr;
+      }
       const err = new Error(
         `Alpaca order rejected: ${res.status} — ${body}`,
       );
