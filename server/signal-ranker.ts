@@ -166,7 +166,7 @@ export function rankSignals(signals: PhaseCSignal[]): ScoredSignal[] {
 // Select best signals — returns winners + outranked for logging
 // ============================================================
 export function selectBestSignals(signals: PhaseCSignal[]): {
-  selected: PhaseCSignal[];
+  selected: ScoredSignal[];
   outranked: ScoredSignal[];
 } {
   if (signals.length === 0) {
@@ -174,7 +174,7 @@ export function selectBestSignals(signals: PhaseCSignal[]): {
   }
 
   const allScored = rankSignals(signals);
-  const selected: PhaseCSignal[] = [];
+  const selected: ScoredSignal[] = [];
   const outranked: ScoredSignal[] = [];
 
   // Group scored signals by symbol for logging
@@ -190,7 +190,7 @@ export function selectBestSignals(signals: PhaseCSignal[]): {
 
   for (const [symbol, group] of symbolGroups) {
     const winner = group[0]; // rank 1
-    selected.push(winner.signal);
+    selected.push(winner);
 
     if (group.length === 1) {
       console.log(
