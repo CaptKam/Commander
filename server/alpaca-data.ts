@@ -8,8 +8,9 @@
  * SIP feed enabled for full market data coverage.
  *
  * Rate limits (monitored and enforced here):
- *   - 200 requests/minute (free tier)
- *   - Warns at 80% utilization, throws at 100%
+ *   - 1000 requests/minute (Algo Trader Plus tier)
+ *   - Throttled to ~600/min sustained (100ms between calls)
+ *   - Warns at 80% utilization, waits at 100%
  *
  * Lookback windows:
  *   - "1D": 365 days (1 year — deep pivot history for pattern detection)
@@ -55,7 +56,7 @@ function getAlpacaKeys(): { key: string; secret: string } {
 const ALPACA_DATA_BASE = "https://data.alpaca.markets";
 
 // ============================================================
-// Cache configuration — generous TTLs to conserve free tier budget
+// Cache configuration — generous TTLs to conserve API budget
 // ============================================================
 const CACHE_TTL_MS: Record<string, number> = {
   "1D": 2 * 60 * 60 * 1000, // 2 hours (daily bars are static intraday)
@@ -74,18 +75,36 @@ function getCacheKey(symbol: string, timeframe: string): string {
 }
 
 // ============================================================
-// Rate Limiter — Alpaca Free Tier: 200 req/min
+// Throttle — minimum delay between consecutive Alpaca API calls
+// 100ms = max 600 calls/min sustained (60% of 1000 limit)
+// Prevents burst spikes that trigger Alpaca's per-second limiter
+// ============================================================
+const MIN_CALL_INTERVAL_MS = 100;
+let lastCallTimestamp = 0;
+
+async function throttle(): Promise<void> {
+  const now = Date.now();
+  const elapsed = now - lastCallTimestamp;
+  if (elapsed < MIN_CALL_INTERVAL_MS) {
+    const delay = MIN_CALL_INTERVAL_MS - elapsed;
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  lastCallTimestamp = Date.now();
+}
+
+// ============================================================
+// Rate Limiter — Alpaca Algo Trader Plus: 1000 req/min
 //
-// Sliding window counter. Logs warnings at 80% utilization.
-// Throws at 100% to prevent 429s from Alpaca.
+// Sliding window counter. Warns at 80% (800 calls).
+// At 100%, waits for the window to rotate instead of throwing.
 // ============================================================
 const RATE_LIMIT_WINDOW_MS = 60_000;  // 1 minute
-const RATE_LIMIT_MAX = 200;           // Alpaca free tier
-const RATE_LIMIT_WARN_PCT = 0.8;      // Warn at 80% (160 calls)
+const RATE_LIMIT_MAX = 1000;          // Algo Trader Plus tier
+const RATE_LIMIT_WARN_PCT = 0.8;      // Warn at 80% (800 calls)
 
 const requestTimestamps: number[] = [];
 
-function checkRateLimit(): void {
+async function checkRateLimit(): Promise<void> {
   const now = Date.now();
   // Evict timestamps older than the window
   while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
@@ -93,23 +112,29 @@ function checkRateLimit(): void {
   }
 
   if (requestTimestamps.length >= RATE_LIMIT_MAX) {
-    const oldestAge = now - requestTimestamps[0];
-    const retryAfterMs = RATE_LIMIT_WINDOW_MS - oldestAge;
-    throw new Error(
-      `[MarketData] Rate limit reached (${RATE_LIMIT_MAX}/min). ` +
-      `Retry after ${Math.ceil(retryAfterMs / 1000)}s. ` +
-      `Upgrade to paid tier for 1000/min.`,
+    // Wait for oldest call to expire out of the window, +500ms buffer
+    const oldestCall = requestTimestamps[0];
+    const waitMs = RATE_LIMIT_WINDOW_MS - (now - oldestCall) + 500;
+    const waitSeconds = Math.ceil(waitMs / 1000);
+    console.log(
+      `[MarketData] Rate limit approaching (${requestTimestamps.length}/${RATE_LIMIT_MAX}). Pausing ${waitSeconds}s...`,
     );
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    // Clean again after waiting
+    const afterWait = Date.now();
+    while (requestTimestamps.length > 0 && requestTimestamps[0] <= afterWait - RATE_LIMIT_WINDOW_MS) {
+      requestTimestamps.shift();
+    }
   }
 
   if (requestTimestamps.length >= RATE_LIMIT_MAX * RATE_LIMIT_WARN_PCT) {
+    const pct = Math.round((requestTimestamps.length / RATE_LIMIT_MAX) * 100);
     console.warn(
-      `[MarketData] Rate limit warning: ${requestTimestamps.length}/${RATE_LIMIT_MAX} calls in last 60s ` +
-      `(${Math.round((requestTimestamps.length / RATE_LIMIT_MAX) * 100)}% utilized)`,
+      `[MarketData] Rate limit warning: ${requestTimestamps.length}/${RATE_LIMIT_MAX} calls in last 60s (${pct}% utilized)`,
     );
   }
 
-  requestTimestamps.push(now);
+  requestTimestamps.push(Date.now());
 }
 
 /**
@@ -262,7 +287,8 @@ async function fetchStockBarsChunk(
   let page = 0;
 
   do {
-    checkRateLimit(); // 200/min guard
+    await throttle();        // 100ms spacing between calls
+    await checkRateLimit();  // 1000/min sliding window
 
     let url =
       `${ALPACA_DATA_BASE}/v2/stocks/bars` +
@@ -370,7 +396,8 @@ async function fetchCryptoBarsChunk(
   let page = 0;
 
   do {
-    checkRateLimit(); // 200/min guard
+    await throttle();        // 100ms spacing between calls
+    await checkRateLimit();  // 1000/min sliding window
 
     // Alpaca crypto uses slash format natively (BTC/USD) — no conversion needed
     let url =
