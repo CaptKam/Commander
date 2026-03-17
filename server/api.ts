@@ -6,7 +6,7 @@
 import { Router } from "express";
 import { db } from "./db";
 import { liveSignals, watchlist, systemSettings, symbolScanState } from "../shared/schema";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice, fetchWatchlist } from "./alpaca-data";
 import { getStreamPrice, getStreamStatus } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
@@ -1406,6 +1406,48 @@ router.post("/orders/place", async (req, res) => {
     } else {
       res.status(orderRes.status).json({ error: body });
     }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/orders/cancel-orphans", async (_req, res) => {
+  try {
+    const headers = alpacaHeaders();
+    if (!headers) {
+      return res.status(500).json({ error: "Alpaca keys not configured" });
+    }
+
+    const ordersRes = await fetch(`${ALPACA_BASE_URL}/v2/orders?status=open&limit=500`, { headers });
+    if (!ordersRes.ok) return res.status(ordersRes.status).json({ error: "Failed to fetch orders" });
+    const orders = (await ordersRes.json()) as any[];
+
+    const allSignals = await db
+      .select({ entryOrderId: liveSignals.entryOrderId })
+      .from(liveSignals)
+      .where(
+        and(
+          isNotNull(liveSignals.entryOrderId),
+          inArray(liveSignals.status, ["pending", "filled"]),
+        ),
+      );
+    const linkedOrderIds = new Set(allSignals.map((s) => s.entryOrderId).filter(Boolean));
+
+    const orphans = orders.filter((o) => !linkedOrderIds.has(o.id));
+    let cancelled = 0;
+    for (const orphan of orphans) {
+      const delRes = await fetch(`${ALPACA_BASE_URL}/v2/orders/${orphan.id}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (delRes.ok || delRes.status === 204) {
+        cancelled++;
+        console.log(`[Cleanup] Cancelled orphan order: ${orphan.symbol} ${orphan.side} $${orphan.limit_price}`);
+      }
+    }
+
+    console.log(`[Cleanup] Cancelled ${cancelled}/${orphans.length} orphan orders`);
+    res.json({ total: orders.length, orphans: orphans.length, cancelled });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

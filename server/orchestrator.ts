@@ -675,18 +675,25 @@ async function runScanCycle(): Promise<void> {
           );
           try { pipelineStats.ordersSkipped++; } catch {}
         }
-      } catch (err) {
-        console.error(
-          `[Orchestrator] Failed to execute signal ${signal.symbol}:`,
-          err,
-        );
-        // Fire Telegram alert — per-signal failure doesn't kill the loop
-        sendError(
-          `Signal execution failed: ${signal.symbol} ${signal.pattern}`,
-          err,
-        ).catch(() => {
-          console.error("[Orchestrator] Failed to send error notification");
-        });
+      } catch (err: any) {
+        if (err?.notShortable && inserted?.id) {
+          await db.update(liveSignals)
+            .set({ status: "paper_only" })
+            .where(eq(liveSignals.id, inserted.id));
+          console.warn(`[Orchestrator] ${signal.symbol} marked paper_only (not shortable)`);
+          try { pipelineStats.ordersSkipped++; } catch {}
+        } else {
+          console.error(
+            `[Orchestrator] Failed to execute signal ${signal.symbol}:`,
+            err,
+          );
+          sendError(
+            `Signal execution failed: ${signal.symbol} ${signal.pattern}`,
+            err,
+          ).catch(() => {
+            console.error("[Orchestrator] Failed to send error notification");
+          });
+        }
       }
     }
 
@@ -799,8 +806,16 @@ async function runScanCycle(): Promise<void> {
             existingOrderSymbols.add(alpacaSymbol);
             placed++;
             console.log(`[Catchup] Order placed for ${sig.symbol} ${sig.patternType} ${sig.direction} (id=${order.id})`);
-          } catch (err) {
-            console.error(`[Catchup] Failed to place order for ${sig.symbol}:`, err);
+          } catch (err: any) {
+            if (err?.notShortable) {
+              await db.update(liveSignals)
+                .set({ status: "paper_only" })
+                .where(eq(liveSignals.id, sig.id));
+              console.warn(`[Catchup] ${sig.symbol} marked paper_only (not shortable)`);
+              skipped++;
+            } else {
+              console.error(`[Catchup] Failed to place order for ${sig.symbol}:`, err);
+            }
           }
         }
         if (placed > 0 || pendingNoOrder.length > 0) {
@@ -922,8 +937,15 @@ async function runScanCycle(): Promise<void> {
               `(price now ${(distancePct * 100).toFixed(1)}% from D) — order placed`,
             );
             try { pipelineStats.ordersPlaced++; } catch {}
-          } catch (err) {
-            console.error(`[Orchestrator] Failed to promote ${sig.symbol}:`, err);
+          } catch (err: any) {
+            if (err?.notShortable) {
+              await db.update(liveSignals)
+                .set({ status: "paper_only" })
+                .where(eq(liveSignals.id, sig.id));
+              console.warn(`[Orchestrator] ${sig.symbol} marked paper_only (not shortable)`);
+            } else {
+              console.error(`[Orchestrator] Failed to promote ${sig.symbol}:`, err);
+            }
           }
         }
       }

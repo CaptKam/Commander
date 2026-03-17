@@ -185,10 +185,24 @@ export async function placePhaseCLimitOrder(
 
     if (!res.ok) {
       const body = await res.text();
+      const lowerBody2 = body.toLowerCase();
+      if (
+        res.status === 422 &&
+        (lowerBody2.includes("cannot be sold short") ||
+         lowerBody2.includes("not shortable") ||
+         lowerBody2.includes("shortable") ||
+         (body.includes("42210000") && side === "sell"))
+      ) {
+        console.warn(
+          `[Alpaca] ${signal.symbol} is not shortable — marking paper_only`,
+        );
+        const paperErr = new Error(`NOT_SHORTABLE: ${signal.symbol}`);
+        (paperErr as any).notShortable = true;
+        throw paperErr;
+      }
       const err = new Error(
         `Alpaca order rejected: ${res.status} — ${body}`,
       );
-      // Fire Telegram alert so your phone knows immediately
       await sendError(
         `Alpaca Limit Order Failed: ${signal.symbol} ${signal.pattern} ${side}`,
         err,
