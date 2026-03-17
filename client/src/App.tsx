@@ -194,36 +194,6 @@ interface WatchlistItem {
   assetClass: string;
 }
 
-interface SignalPipelineEntry {
-  id: number;
-  symbol: string;
-  pattern: string;
-  timeframe: string;
-  direction: string;
-  status: string;
-  stage: string;
-  stageDetail: string;
-  stageColor: string;
-  entryPrice: number | null;
-  stopLoss: number | null;
-  tp1: number | null;
-  tp2: number | null;
-  score: number | null;
-  entryOrderId: string | null;
-  hasOrder: boolean;
-  detectedAt: string;
-  filledAt: string | null;
-  blockedReason: string | null;
-}
-
-interface SignalPipelineData {
-  signals: SignalPipelineEntry[];
-  summary: {
-    total: number;
-    byStage: Record<string, number>;
-  };
-}
-
 // ============================================================
 // Constants & helpers
 // ============================================================
@@ -551,7 +521,7 @@ export default function App() {
           {activePage === "dashboard" && (
             <>
               <div className="flex-1 flex flex-col overflow-hidden border-r" style={{ borderColor: "var(--border-color)" }}>
-                {/* BLOTTER */}
+                {/* BLOTTER + ACTIVITY SPLIT */}
                 <div className="shrink-0 flex items-center justify-between px-4 h-9 border-b" style={{ borderColor: "var(--border-default)", background: "var(--bg-card)" }}>
                   <span className="text-[11px] uppercase tracking-widest font-medium" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
                     Positions ({positions.length})
@@ -637,6 +607,60 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* HOT SIGNALS STRIP */}
+                <div className="shrink-0 border-t" style={{ borderColor: "var(--border-default)", background: "var(--bg-secondary)" }}>
+                  <div className="flex items-center justify-between px-4 h-8">
+                    <span className="text-[11px] uppercase tracking-widest font-medium" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
+                      Active Signals ({approaching.length})
+                    </span>
+                    <button
+                      onClick={() => setActivePage("signals")}
+                      className="text-[11px] uppercase tracking-wider font-medium"
+                      style={{ color: "var(--sys-light)", cursor: "pointer", background: "none", border: "none" }}
+                    >
+                      View All →
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto" style={{ maxHeight: 180 }}>
+                    {approaching.slice(0, 12).map((s, idx) => {
+                      const dist = s.distancePct ?? 999;
+                      const isHot = dist <= 2;
+                      return (
+                        <div
+                          key={`${s.symbol}-${s.timeframe}-${s.id ?? idx}`}
+                          className="flex items-center gap-2 px-4 py-1.5 border-t"
+                          style={{ borderColor: "rgba(255,255,255,0.03)", background: isHot ? "rgba(249,115,22,0.04)" : "transparent" }}
+                        >
+                          <span className="text-[12px] font-semibold text-white" style={{ minWidth: 70 }}>{s.symbol}</span>
+                          <span className="text-[11px]" style={{ color: "var(--text-dim)", minWidth: 65 }}>{s.pattern}</span>
+                          <span className="text-[11px] px-1 py-px rounded uppercase font-semibold"
+                            style={{
+                              background: s.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                              color: s.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                            }}
+                          >{s.direction === "long" ? "L" : "S"}</span>
+                          <span className="text-[11px] flex-1 truncate" style={{ color: isHot ? "#f97316" : "var(--text-muted)" }}>
+                            Phase C → D @ {fmt(s.projectedD)}
+                          </span>
+                          <span className="text-[12px] font-semibold tabular-nums" style={{
+                            color: dist <= 1 ? "var(--accent-red)" : dist <= 2 ? "#f97316" : dist <= 5 ? "#fbbf24" : "var(--text-muted)",
+                            minWidth: 40,
+                            textAlign: "right",
+                          }}>
+                            {dist.toFixed(1)}%
+                          </span>
+                          {s.hasOrder && <span className="text-[10px]" style={{ color: "var(--accent-green)" }}>●</span>}
+                        </div>
+                      );
+                    })}
+                    {approaching.length === 0 && (
+                      <div className="px-4 py-3 text-center text-[12px]" style={{ color: "var(--text-muted)" }}>
+                        Scanner searching for patterns...
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -776,6 +800,19 @@ export default function App() {
             </div>
           )}
 
+          {/* ============ SIGNALS WATCHBOARD ============ */}
+          {activePage === "signals" && (
+            <div className="flex-1 flex overflow-hidden">
+              <div className="flex-1 overflow-y-auto">
+                <SymbolWatchboard
+                  approaching={approaching}
+                  signalPipeline={signalPipeline}
+                  positions={positions}
+                />
+              </div>
+            </div>
+          )}
+
           {/* ============ PIPELINE PAGE ============ */}
           {activePage === "pipeline" && (
             <div className="flex-1 overflow-y-auto">
@@ -797,6 +834,364 @@ export default function App() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Symbol Watchboard — shows every tracked symbol with phase
+// ============================================================
+const PHASE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  "approaching": { label: "Phase C → D", color: "#fbbf24", bg: "rgba(245,158,11,0.10)", icon: "◎" },
+  "imminent":    { label: "Imminent",     color: "#f97316", bg: "rgba(249,115,22,0.12)", icon: "⚡" },
+  "order":       { label: "Order Live",   color: "#60a5fa", bg: "rgba(59,130,246,0.10)", icon: "●" },
+  "filled":      { label: "In Trade",     color: "#34d399", bg: "rgba(16,185,129,0.10)", icon: "▲" },
+  "exiting":     { label: "Exiting",      color: "#a78bfa", bg: "rgba(139,92,246,0.10)", icon: "◆" },
+  "closed":      { label: "Closed",       color: "var(--text-muted)", bg: "rgba(255,255,255,0.03)", icon: "✓" },
+  "paper":       { label: "Paper Only",   color: "#fbbf24", bg: "rgba(245,158,11,0.06)", icon: "○" },
+};
+
+function getPhaseFromSignal(
+  ap: ApproachingSignal | undefined,
+  sp: SignalPipelineEntry | undefined,
+  hasPosition: boolean
+): { phase: string; description: string; phaseKey: string } {
+  if (hasPosition && sp?.stage === "Exiting") {
+    return { phase: "Exiting", description: "TP/SL exits placed, monitoring", phaseKey: "exiting" };
+  }
+  if (hasPosition || sp?.stage === "Filled") {
+    return { phase: "In Trade", description: "Position filled, managing exits", phaseKey: "filled" };
+  }
+  if (sp?.stage === "Closed") {
+    return { phase: "Closed", description: sp.stageDetail || "Trade completed", phaseKey: "closed" };
+  }
+  if (sp?.stage === "Order Placed") {
+    const dist = ap?.distancePct;
+    const distStr = dist != null ? ` — ${dist.toFixed(1)}% away` : "";
+    return { phase: "Order Live", description: `GTC limit @ ${sp.entryPrice != null ? fmt(sp.entryPrice) : "?"}${distStr}`, phaseKey: "order" };
+  }
+  if (sp?.stage === "Paper Only" || ap?.paperOnly) {
+    const dist = ap?.distancePct;
+    const distStr = dist != null ? `${dist.toFixed(1)}% from D` : "";
+    return { phase: "Paper Only", description: `Tracking ${distStr} — no live order`, phaseKey: "paper" };
+  }
+  if (sp?.stage === "Market Closed") {
+    const dist = ap?.distancePct;
+    const distStr = dist != null ? ` — ${dist.toFixed(1)}% away` : "";
+    return { phase: "Market Closed", description: `Equity order deferred${distStr}`, phaseKey: "approaching" };
+  }
+  if (ap) {
+    const dist = ap.distancePct ?? 999;
+    if (dist <= 2) {
+      return {
+        phase: "Imminent",
+        description: `${dist.toFixed(1)}% from Phase D entry @ ${fmt(ap.projectedD)}`,
+        phaseKey: "imminent",
+      };
+    }
+    if (ap.hasOrder) {
+      return {
+        phase: "Order Live",
+        description: `GTC limit @ ${fmt(ap.projectedD)} — ${dist.toFixed(1)}% away`,
+        phaseKey: "order",
+      };
+    }
+    return {
+      phase: "Phase C → D",
+      description: `Waiting on D @ ${fmt(ap.projectedD)} — ${dist.toFixed(1)}% away`,
+      phaseKey: "approaching",
+    };
+  }
+  if (sp) {
+    return { phase: sp.stage, description: sp.stageDetail || "", phaseKey: "approaching" };
+  }
+  return { phase: "Unknown", description: "", phaseKey: "approaching" };
+}
+
+interface WatchboardSymbol {
+  symbol: string;
+  pattern: string;
+  direction: string;
+  timeframe: string;
+  phaseKey: string;
+  phase: string;
+  description: string;
+  distancePct: number | null;
+  entryPrice: number | null;
+  currentPrice: number | null;
+  sl: number | null;
+  tp1: number | null;
+  rr: number | null;
+  score: number | null;
+  hasOrder: boolean;
+  blocked: string | null;
+  createdAt: string;
+}
+
+function SymbolWatchboard({
+  approaching,
+  signalPipeline,
+  positions,
+}: {
+  approaching: ApproachingSignal[];
+  signalPipeline: SignalPipelineData | null;
+  positions: Position[];
+}) {
+  const [phaseFilter, setPhaseFilter] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<"distance" | "time" | "symbol">("distance");
+
+  const { items, phaseCounts } = useMemo(() => {
+    const positionSymbols = new Set(positions.map((p) => p.symbol));
+    const spMap = new Map<string, SignalPipelineEntry>();
+    if (signalPipeline) {
+      for (const s of signalPipeline.signals) {
+        const key = `${s.symbol}:${s.timeframe}:${s.pattern}`;
+        const existing = spMap.get(key);
+        if (!existing || (s.stage !== "Closed" && s.stage !== "Expired")) {
+          spMap.set(key, s);
+        }
+      }
+    }
+
+    const result: WatchboardSymbol[] = [];
+    const seen = new Set<string>();
+
+    for (const ap of approaching) {
+      const compKey = `${ap.symbol}:${ap.timeframe}:${ap.pattern}`;
+      seen.add(compKey);
+      const sp = spMap.get(compKey);
+      const hasPos = positionSymbols.has(ap.symbol);
+      const { phase, description, phaseKey } = getPhaseFromSignal(ap, sp, hasPos);
+      result.push({
+        symbol: ap.symbol,
+        pattern: ap.pattern,
+        direction: ap.direction,
+        timeframe: ap.timeframe,
+        phaseKey,
+        phase,
+        description,
+        distancePct: ap.distancePct,
+        entryPrice: ap.projectedD,
+        currentPrice: ap.currentPrice,
+        sl: ap.sl,
+        tp1: ap.tp1,
+        rr: ap.rr ?? null,
+        score: sp?.score ?? null,
+        hasOrder: ap.hasOrder ?? false,
+        blocked: ap.blocked ?? null,
+        createdAt: ap.createdAt,
+      });
+    }
+
+    if (signalPipeline) {
+      for (const sp of signalPipeline.signals) {
+        const compKey = `${sp.symbol}:${sp.timeframe}:${sp.pattern}`;
+        if (seen.has(compKey)) continue;
+        if (sp.stage === "Expired" || sp.stage === "Dismissed" || sp.stage === "Outranked") continue;
+        seen.add(compKey);
+        const hasPos = positionSymbols.has(sp.symbol);
+        const { phase, description, phaseKey } = getPhaseFromSignal(undefined, sp, hasPos);
+        result.push({
+          symbol: sp.symbol,
+          pattern: sp.pattern,
+          direction: sp.direction,
+          timeframe: sp.timeframe,
+          phaseKey,
+          phase,
+          description,
+          distancePct: null,
+          entryPrice: sp.entryPrice,
+          currentPrice: null,
+          sl: sp.stopLoss,
+          tp1: sp.tp1,
+          rr: null,
+          score: sp.score,
+          hasOrder: sp.hasOrder,
+          blocked: sp.blockedReason ?? null,
+          createdAt: sp.detectedAt,
+        });
+      }
+    }
+
+    const counts: Record<string, number> = {};
+    for (const it of result) counts[it.phaseKey] = (counts[it.phaseKey] ?? 0) + 1;
+    return { items: result, phaseCounts: counts };
+  }, [approaching, signalPipeline, positions]);
+
+  const sorted = useMemo(() => {
+    const filtered = phaseFilter ? items.filter((i) => i.phaseKey === phaseFilter) : items;
+    return [...filtered].sort((a, b) => {
+      if (sortMode === "distance") {
+        return (a.distancePct ?? 999) - (b.distancePct ?? 999);
+      }
+      if (sortMode === "symbol") return a.symbol.localeCompare(b.symbol);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [items, phaseFilter, sortMode]);
+
+  return (
+    <div style={{ background: "var(--bg-card)" }} className="h-full">
+      <div className="flex items-center gap-1 px-4 py-2.5 flex-wrap border-b" style={{ borderColor: "var(--border-default)" }}>
+        <span className="text-[11px] uppercase tracking-widest font-medium mr-2" style={{ color: "var(--sys-light)", fontFamily: DISPLAY }}>
+          Watchboard
+        </span>
+        <button
+          onClick={() => setPhaseFilter(null)}
+          className="text-[12px] px-2 py-0.5 rounded font-semibold uppercase"
+          style={{
+            background: !phaseFilter ? "var(--sys-bg)" : "rgba(255,255,255,0.04)",
+            color: !phaseFilter ? "var(--sys-light)" : "var(--text-muted)",
+            border: !phaseFilter ? "0.5px solid var(--sys-border)" : "0.5px solid transparent",
+            cursor: "pointer",
+          }}
+        >
+          All {items.length}
+        </button>
+        {Object.entries(PHASE_CONFIG).map(([key, cfg]) => {
+          const count = phaseCounts[key] ?? 0;
+          if (count === 0) return null;
+          return (
+            <button
+              key={key}
+              onClick={() => setPhaseFilter(phaseFilter === key ? null : key)}
+              className="text-[12px] px-2 py-0.5 rounded font-semibold"
+              style={{
+                background: phaseFilter === key ? cfg.bg : "rgba(255,255,255,0.03)",
+                color: cfg.color,
+                border: phaseFilter === key ? `1px solid ${cfg.color}40` : "1px solid transparent",
+                cursor: "pointer",
+              }}
+            >
+              {cfg.icon} {cfg.label} {count}
+            </button>
+          );
+        })}
+        <div className="flex-1" />
+        <div className="flex gap-1">
+          {(["distance", "time", "symbol"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSortMode(s)}
+              className="text-[12px] px-1.5 py-0.5 rounded"
+              style={{
+                background: sortMode === s ? "rgba(255,255,255,0.1)" : "transparent",
+                color: sortMode === s ? "white" : "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              {s === "distance" ? "Closest" : s === "time" ? "Recent" : "A-Z"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 110px)" }}>
+        {sorted.length === 0 ? (
+          <div className="p-6 text-center" style={{ color: "var(--text-muted)" }}>
+            No active signals. Scanner is looking for harmonic patterns...
+          </div>
+        ) : (
+          <div className="grid gap-0" style={{ fontFamily: MONO }}>
+            {sorted.map((item) => {
+              const cfg = PHASE_CONFIG[item.phaseKey] ?? PHASE_CONFIG["approaching"];
+              const isHot = item.distancePct !== null && item.distancePct <= 2;
+              return (
+                <div
+                  key={`${item.symbol}-${item.timeframe}-${item.pattern}-${item.createdAt}`}
+                  className="flex items-center gap-3 px-4 py-2.5 border-b transition-colors"
+                  style={{
+                    borderColor: "var(--border-color)",
+                    background: isHot ? "rgba(249,115,22,0.04)" : "transparent",
+                  }}
+                >
+                  <div className="flex items-center gap-2" style={{ minWidth: 120 }}>
+                    <span className="text-[13px]" style={{ color: cfg.color, opacity: 0.7 }}>{cfg.icon}</span>
+                    <span className="text-[14px] font-bold text-white">{item.symbol}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5" style={{ minWidth: 130 }}>
+                    <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{item.pattern}</span>
+                    <span className="text-[11px] px-1 py-px rounded uppercase font-semibold"
+                      style={{
+                        background: item.direction === "long" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                        color: item.direction === "long" ? "var(--accent-green)" : "var(--accent-red)",
+                      }}
+                    >
+                      {item.direction}
+                    </span>
+                    <span className="text-[11px]" style={{ color: "var(--text-dim)" }}>{item.timeframe}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="text-[11px] px-1.5 py-0.5 rounded font-semibold shrink-0"
+                        style={{ background: cfg.bg, color: cfg.color }}
+                      >
+                        {item.phase}
+                      </span>
+                      <span className="text-[12px] truncate" style={{ color: "var(--text-muted)" }}>
+                        {item.description}
+                      </span>
+                    </div>
+                  </div>
+
+                  {item.distancePct !== null && (
+                    <div className="text-right shrink-0" style={{ minWidth: 55 }}>
+                      <span
+                        className="text-[13px] font-semibold tabular-nums"
+                        style={{
+                          color: item.distancePct <= 1 ? "var(--accent-red)" : item.distancePct <= 2 ? "#f97316" : item.distancePct <= 5 ? "#fbbf24" : "var(--text-muted)",
+                        }}
+                      >
+                        {item.distancePct.toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+
+                  {item.entryPrice !== null && (
+                    <div className="text-right shrink-0" style={{ minWidth: 80 }}>
+                      <div className="text-[11px]" style={{ color: "var(--text-dim)" }}>Entry</div>
+                      <div className="text-[12px] tabular-nums" style={{ color: "var(--text-muted)" }}>{fmt(item.entryPrice)}</div>
+                    </div>
+                  )}
+
+                  {item.currentPrice !== null && (
+                    <div className="text-right shrink-0" style={{ minWidth: 80 }}>
+                      <div className="text-[11px]" style={{ color: "var(--text-dim)" }}>Now</div>
+                      <div className="text-[12px] tabular-nums text-white">{fmt(item.currentPrice)}</div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 shrink-0" style={{ minWidth: 65 }}>
+                    {item.score !== null && (
+                      <span className="text-[11px] tabular-nums" style={{
+                        color: item.score >= 75 ? "var(--accent-green)" : item.score >= 50 ? "#fbbf24" : "var(--text-muted)",
+                      }}>
+                        Q{item.score.toFixed(0)}
+                      </span>
+                    )}
+                    {item.rr !== null && item.rr > 0 && (
+                      <span className="text-[11px] tabular-nums" style={{ color: "var(--text-dim)" }}>
+                        {item.rr.toFixed(1)}R
+                      </span>
+                    )}
+                    {item.hasOrder && (
+                      <span className="text-[11px]" style={{ color: "var(--accent-green)" }}>●</span>
+                    )}
+                  </div>
+
+                  <div className="text-right shrink-0" style={{ minWidth: 40 }}>
+                    <span className="text-[11px]" style={{ color: "var(--text-dim)" }}>
+                      {relativeTime(item.createdAt)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
