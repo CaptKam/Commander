@@ -347,7 +347,7 @@ export default function App() {
   const feed = useMemo<FeedEvent[]>(() => {
     const events: FeedEvent[] = [];
 
-    history.slice(0, 20).forEach((t) => {
+    history.slice(0, 50).forEach((t) => {
       events.push({
         time: t.filled_at,
         tag: "FILL",
@@ -368,7 +368,7 @@ export default function App() {
       });
     });
 
-    signals.slice(0, 30).forEach((s) => {
+    signals.slice(0, 60).forEach((s) => {
       if (s.status === "closed" || s.status === "cancelled") {
         events.push({
           time: s.createdAt,
@@ -387,7 +387,7 @@ export default function App() {
     });
 
     events.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-    return events.slice(0, 50);
+    return events.slice(0, 100);
   }, [history, approaching, signals]);
 
   // Alerts
