@@ -69,10 +69,8 @@ const INITIAL_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
-// Shared backoff steps — longer waits to let Alpaca release phantom connections from restarts
-const BACKOFF_STEPS = [15_000, 30_000, 60_000, 120_000, 300_000];
-const MAX_CONSECUTIVE_FAILURES = 5;
-// If a connection survives this long, reset the failure counter
+const BACKOFF_STEPS = [30_000, 60_000, 120_000, 300_000, 300_000];
+const MAX_CONSECUTIVE_FAILURES = 10;
 const STABLE_CONNECTION_MS = 30_000;
 
 // SIP market hours check interval (check every 5 minutes when suspended)
@@ -102,8 +100,10 @@ let cryptoConsecutiveFailures = 0;
 let cryptoSuspended = false;
 let cryptoReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let cryptoConnectionOpenedAt = 0;
-// Crypto resumes after suspension cooldown (5 min) instead of market hours
-const CRYPTO_SUSPEND_COOLDOWN_MS = 5 * 60 * 1000;
+const CRYPTO_SUSPEND_COOLDOWN_MS = 3 * 60 * 1000;
+
+let lastCryptoError406 = false;
+let lastSipError406 = false;
 
 // ============================================================
 // SIP Market Hours — Mon-Fri 4:00 AM to 8:00 PM Eastern
@@ -269,9 +269,12 @@ function createStream(
           });
         }
 
-        // Auth/connection error
         if (msg.T === "error") {
           console.error(`[WebSocket] ${label}: error — code=${msg.code} msg=${msg.msg}`);
+          if (msg.code === 406) {
+            if (isCrypto) lastCryptoError406 = true;
+            if (isSip) lastSipError406 = true;
+          }
         }
       }
     } catch (err) {
@@ -324,7 +327,9 @@ function createStream(
         createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
       }, delayMs);
     } else if (isCrypto) {
-      // Check if this connection was stable (survived > 30s)
+      const was406 = lastCryptoError406;
+      lastCryptoError406 = false;
+
       const connectionDuration = Date.now() - cryptoConnectionOpenedAt;
       if (cryptoConnectionOpenedAt > 0 && connectionDuration > STABLE_CONNECTION_MS) {
         cryptoConsecutiveFailures = 0;
@@ -332,7 +337,6 @@ function createStream(
         cryptoConsecutiveFailures++;
       }
 
-      // If too many consecutive failures, suspend and schedule cooldown
       if (cryptoConsecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         cryptoSuspended = true;
         console.error(
@@ -348,13 +352,14 @@ function createStream(
         return;
       }
 
-      // Exponential backoff: 2s, 5s, 10s, 30s, 60s
-      const backoffIdx = Math.min(cryptoConsecutiveFailures, BACKOFF_STEPS.length - 1);
-      const delayMs = BACKOFF_STEPS[backoffIdx];
+      const delayMs = was406
+        ? Math.min(180_000 * cryptoConsecutiveFailures, 600_000)
+        : BACKOFF_STEPS[Math.min(cryptoConsecutiveFailures, BACKOFF_STEPS.length - 1)];
 
       console.warn(
         `[WebSocket] ${label}: disconnected (code=${code} reason=${reason.toString()}) — ` +
-        `reconnecting in ${delayMs / 1000}s (failure ${cryptoConsecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
+        `${was406 ? "406 connection limit — " : ""}` +
+        `reconnecting in ${Math.round(delayMs / 1000)}s (failure ${cryptoConsecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
       );
 
       cryptoReconnectTimer = setTimeout(() => {
@@ -446,12 +451,11 @@ export function startPriceStreams(watchlist: string[]): void {
     `[WebSocket] Starting streams: ${cryptoSymbols.length} crypto, ${stockSymbols.length} stocks`,
   );
 
-  // Delay initial connections to let Alpaca release stale phantom connections
-  // from previous process restarts (Replit doesn't cleanly terminate WebSockets)
-  console.log("[WebSocket] Waiting 10s for stale connections to expire...");
+  const BOOT_DELAY_MS = 60_000;
+  console.log(`[WebSocket] Waiting ${BOOT_DELAY_MS / 1000}s for stale connections to expire...`);
 
-  // Crypto stream — always on (delayed 10s)
   setTimeout(() => {
+    console.log("[WebSocket] Boot delay complete — connecting crypto stream");
     createStream(
       CRYPTO_WS_URL,
       "Crypto",
@@ -463,9 +467,8 @@ export function startPriceStreams(watchlist: string[]): void {
       (hb) => { cryptoHeartbeat = hb; },
       () => cryptoHeartbeat,
     );
-  }, 10_000);
+  }, BOOT_DELAY_MS);
 
-  // Stock stream (SIP) — market hours only (delayed 12s, staggered after crypto)
   setTimeout(() => {
     createStream(
       STOCK_WS_URL,
@@ -478,7 +481,7 @@ export function startPriceStreams(watchlist: string[]): void {
       (hb) => { stockHeartbeat = hb; },
       () => stockHeartbeat,
     );
-  }, 12_000);
+  }, BOOT_DELAY_MS + 2_000);
 }
 
 /**
