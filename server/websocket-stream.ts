@@ -69,8 +69,8 @@ const INITIAL_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
-// Shared backoff steps: 2s, 5s, 10s, 30s, 60s
-const BACKOFF_STEPS = [2_000, 5_000, 10_000, 30_000, 60_000];
+// Shared backoff steps — longer waits to let Alpaca release phantom connections from restarts
+const BACKOFF_STEPS = [15_000, 30_000, 60_000, 120_000, 300_000];
 const MAX_CONSECUTIVE_FAILURES = 5;
 // If a connection survives this long, reset the failure counter
 const STABLE_CONNECTION_MS = 30_000;
@@ -446,31 +446,39 @@ export function startPriceStreams(watchlist: string[]): void {
     `[WebSocket] Starting streams: ${cryptoSymbols.length} crypto, ${stockSymbols.length} stocks`,
   );
 
-  // Crypto stream — always on
-  createStream(
-    CRYPTO_WS_URL,
-    "Crypto",
-    cryptoSymbols,
-    () => cryptoReconnectMs,
-    (ms) => { cryptoReconnectMs = ms; },
-    (ws) => { cryptoWs = ws; },
-    () => cryptoWs,
-    (hb) => { cryptoHeartbeat = hb; },
-    () => cryptoHeartbeat,
-  );
+  // Delay initial connections to let Alpaca release stale phantom connections
+  // from previous process restarts (Replit doesn't cleanly terminate WebSockets)
+  console.log("[WebSocket] Waiting 10s for stale connections to expire...");
 
-  // Stock stream (SIP) — market hours only
-  createStream(
-    STOCK_WS_URL,
-    "Stock/SIP",
-    stockSymbols,
-    () => stockReconnectMs,
-    (ms) => { stockReconnectMs = ms; },
-    (ws) => { stockWs = ws; },
-    () => stockWs,
-    (hb) => { stockHeartbeat = hb; },
-    () => stockHeartbeat,
-  );
+  // Crypto stream — always on (delayed 10s)
+  setTimeout(() => {
+    createStream(
+      CRYPTO_WS_URL,
+      "Crypto",
+      cryptoSymbols,
+      () => cryptoReconnectMs,
+      (ms) => { cryptoReconnectMs = ms; },
+      (ws) => { cryptoWs = ws; },
+      () => cryptoWs,
+      (hb) => { cryptoHeartbeat = hb; },
+      () => cryptoHeartbeat,
+    );
+  }, 10_000);
+
+  // Stock stream (SIP) — market hours only (delayed 12s, staggered after crypto)
+  setTimeout(() => {
+    createStream(
+      STOCK_WS_URL,
+      "Stock/SIP",
+      stockSymbols,
+      () => stockReconnectMs,
+      (ms) => { stockReconnectMs = ms; },
+      (ws) => { stockWs = ws; },
+      () => stockWs,
+      (hb) => { stockHeartbeat = hb; },
+      () => stockHeartbeat,
+    );
+  }, 12_000);
 }
 
 /**
