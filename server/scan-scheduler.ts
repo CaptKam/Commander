@@ -249,10 +249,7 @@ export async function initializeScanStates(
           scanIntervalMs: intervalMs,
           pivotCount: 0,
           updatedAt: now,
-        }).onConflictDoUpdate({
-          target: [symbolScanState.symbol, symbolScanState.timeframe],
-          set: {}, // No-op if already exists
-        });
+        }).onConflictDoNothing();
         insertedCount++;
       }
     }
