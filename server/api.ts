@@ -8,7 +8,7 @@ import { db } from "./db";
 import { liveSignals, watchlist, systemSettings, symbolScanState } from "../shared/schema";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice, fetchWatchlist } from "./alpaca-data";
-import { getStreamPrice, getStreamStatus } from "./websocket-stream";
+import { getStreamPrice, getStreamStatus, getAllStreamPrices } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
 import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen, pipelineStats } from "./orchestrator";
 
@@ -1455,6 +1455,25 @@ router.post("/orders/cancel-orphans", async (_req, res) => {
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// ============================================================
+// Ticker tape — streaming prices for top watchlist symbols
+// ============================================================
+router.get("/ticker", (_req, res) => {
+  const prices = getAllStreamPrices();
+  const watchlist = ["BTC/USD","ETH/USD","SOL/USD","DOGE/USD","XRP/USD","TSLA","NVDA","AMZN","META","AAPL","MSFT","SPY","QQQ","AMD","GOOGL"];
+
+  const ticker = watchlist.map(symbol => {
+    const entry = prices.get(symbol) ?? prices.get(symbol.replace(/\//g, ""));
+    return {
+      symbol: symbol.replace("/USD", ""),
+      price: entry?.price ?? null,
+      timestamp: entry?.timestamp ?? null,
+    };
+  }).filter(t => t.price !== null);
+
+  res.json(ticker);
 });
 
 export default router;

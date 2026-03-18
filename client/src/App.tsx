@@ -268,6 +268,8 @@ export default function App() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedSignalId, setSelectedSignalId] = useState<number | null>(null);
   const [chartTimeframe, setChartTimeframe] = useState<"4H" | "1D">("4H");
+  const [tickerData, setTickerData] = useState<Array<{symbol: string; price: number}>>([]);
+  const [marketClock, setMarketClock] = useState({ isOpen: false, label: "CLOSED", countdown: "" });
 
   // Cancel an open order on Alpaca
   const cancelOrder = useCallback(async (orderId: string) => {
@@ -368,12 +370,69 @@ export default function App() {
     };
   }, [fetchAll, fetchFast, fetchMedium, fetchSlow]);
 
+  // Ticker tape polling — 5s
+  useEffect(() => {
+    const poll = () => fetch("/api/ticker").then(r => r.json()).then(setTickerData).catch(() => {});
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Market clock — 10s
+  useEffect(() => {
+    const update = () => {
+      const now = new Date();
+      const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const hours = et.getHours();
+      const minutes = et.getMinutes();
+      const day = et.getDay();
+      const timeMinutes = hours * 60 + minutes;
+      const isWeekday = day >= 1 && day <= 5;
+      const preMarket = timeMinutes >= 240 && timeMinutes < 570;
+      const regularHours = timeMinutes >= 570 && timeMinutes < 960;
+      const afterHours = timeMinutes >= 960 && timeMinutes < 1200;
+      let label = "CLOSED";
+      let isOpen = false;
+      let countdown = "";
+      if (!isWeekday) {
+        label = "WEEKEND";
+        countdown = "Opens Monday 9:30 AM ET";
+      } else if (regularHours) {
+        isOpen = true;
+        label = "MARKET OPEN";
+        const closeMin = 960 - timeMinutes;
+        countdown = `Closes in ${Math.floor(closeMin / 60)}h ${closeMin % 60}m`;
+      } else if (preMarket) {
+        label = "PRE-MARKET";
+        const openMin = 570 - timeMinutes;
+        countdown = `Opens in ${Math.floor(openMin / 60)}h ${openMin % 60}m`;
+      } else if (afterHours) {
+        label = "AFTER-HOURS";
+        const closeMin = 1200 - timeMinutes;
+        countdown = `AH closes in ${Math.floor(closeMin / 60)}h ${closeMin % 60}m`;
+      } else {
+        label = "CLOSED";
+        if (timeMinutes < 240) {
+          const openMin = 570 - timeMinutes;
+          countdown = `Opens in ${Math.floor(openMin / 60)}h ${openMin % 60}m`;
+        } else {
+          countdown = "Opens tomorrow 9:30 AM ET";
+        }
+      }
+      setMarketClock({ isOpen, label, countdown });
+    };
+    update();
+    const id = setInterval(update, 10000);
+    return () => clearInterval(id);
+  }, []);
+
   // ---- Derived ----
   const equity = account?.equity ?? 0;
   const bp = account?.buying_power ?? 0;
   const lockedPct = equity > 0 ? ((equity - bp) / equity) * 100 : 0;
   const totalPl = positions.reduce((s, p) => s + p.unrealized_pl, 0);
   const totalPlPct = equity > 0 ? (totalPl / equity) * 100 : 0;
+  const bpPct = account ? Math.round((1 - account.buying_power / account.equity) * 100) : 0;
 
   // Sorted blotter
   const sortedPositions = useMemo(() => {
@@ -456,6 +515,42 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden terminal-bg" style={{ background: "var(--bg-primary)", fontFamily: MONO, fontSize: "13px" }}>
+      {/* NYSE-STYLE TICKER TAPE */}
+      <style>{`@keyframes ticker-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }`}</style>
+      {tickerData.length > 0 && (
+        <div style={{
+          height: 28,
+          background: "var(--bg-main)",
+          borderBottom: "0.5px solid var(--border-color)",
+          overflow: "hidden",
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+        }}>
+          <div style={{
+            display: "flex",
+            gap: 32,
+            animation: "ticker-scroll 30s linear infinite",
+            whiteSpace: "nowrap",
+            paddingLeft: "100%",
+          }}>
+            {tickerData.concat(tickerData).map((t, i) => (
+              <span key={i} style={{
+                fontSize: 11,
+                fontFamily: "'JetBrains Mono', monospace",
+                letterSpacing: "0.5px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}>
+                <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>{t.symbol}</span>
+                <span style={{ color: "var(--text-main)" }}>${t.price < 1 ? t.price.toFixed(4) : t.price < 100 ? t.price.toFixed(2) : t.price.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ================================================================ */}
       {/* HEADER BAR — Hedge fund terminal aesthetic                        */}
       {/* ================================================================ */}
@@ -499,6 +594,41 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>Equity</span>
             <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{fmt(equity)}</span>
+          </div>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
+          <div className="flex flex-col items-center">
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>W/L</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>
+              <span style={{ color: "var(--accent-green)" }}>{positions.filter(p => p.unrealized_pl >= 0).length}</span>
+              <span style={{ color: "var(--text-dim)" }}>/</span>
+              <span style={{ color: "var(--accent-red)" }}>{positions.filter(p => p.unrealized_pl < 0).length}</span>
+            </span>
+          </div>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
+          <div className="flex flex-col items-center">
+            <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>BP Used</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: bpPct > 80 ? "var(--accent-red)" : bpPct > 50 ? "var(--accent-amber)" : "var(--accent-green)" }}>
+              {bpPct.toFixed(0)}%
+            </span>
+          </div>
+          <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
+          <div className="flex items-center gap-2">
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%",
+              background: marketClock.isOpen ? "var(--accent-green)" : "var(--accent-red)",
+              boxShadow: marketClock.isOpen ? "0 0 6px var(--accent-green)" : "none",
+            }} />
+            <div className="flex flex-col">
+              <span className="text-[11px] uppercase tracking-wider" style={{
+                color: marketClock.isOpen ? "var(--accent-green)" : "var(--accent-red)",
+                fontFamily: DISPLAY
+              }}>
+                {marketClock.label}
+              </span>
+              <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
+                {marketClock.countdown}
+              </span>
+            </div>
           </div>
         </div>
 
