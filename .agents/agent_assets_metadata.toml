@@ -12,3 +12,9 @@ id = "v1YhdMmFHc7BdRMWNYe--"
 uri = "file://open-positions-report.md"
 type = "text"
 title = "FTM COMMANDER — All 7 Open Positions Report"
+
+[[outputs]]
+id = "TP0Z3Zb8X8UlXHt7hKSaJ"
+uri = "file://ftm-commander-full-review.md"
+type = "text"
+title = "FTM COMMANDER — Complete System Review"
