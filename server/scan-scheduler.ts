@@ -13,7 +13,7 @@ import { db } from "./db";
 import { symbolScanState, watchlist } from "../shared/schema";
 import type { PatternPhaseResult } from "./patterns";
 import type { FilteredAsset } from "./universe";
-import { lte, inArray, asc, sql } from "drizzle-orm";
+import { and, lte, inArray, asc, sql } from "drizzle-orm";
 
 // ============================================================
 // Scan Interval Lookup — milliseconds between scans per phase
@@ -395,6 +395,7 @@ export interface ScanStateStats {
     projectedD: string | null;
     distanceToDPct: string | null;
     nextScanDue: string;
+    tier: "IMMINENT" | "APPROACHING";
   }>;
 }
 
@@ -436,22 +437,31 @@ export async function getScanStateStats(): Promise<ScanStateStats> {
       .limit(1);
     const nextDue = nextDueRows.length > 0 ? nextDueRows[0].nextScanDue.toISOString() : null;
 
-    // Hot symbols: CD_PROJECTED or D_APPROACHING
+    // Hot symbols: CD_PROJECTED or D_APPROACHING within 15% of projected D
+    // Symbols 15%+ away are just projected, not actionably "hot"
     const hotRows = await db
       .select()
       .from(symbolScanState)
-      .where(inArray(symbolScanState.phase, ["CD_PROJECTED", "D_APPROACHING"]));
+      .where(
+        and(
+          inArray(symbolScanState.phase, ["CD_PROJECTED", "D_APPROACHING"]),
+          lte(symbolScanState.distanceToDPct, "15"),
+        ),
+      );
 
-    const hotSymbols = hotRows.map((r) => ({
-      symbol: r.symbol,
-      timeframe: r.timeframe,
-      phase: r.phase,
-      bestPattern: r.bestPattern,
-      bestDirection: r.bestDirection,
-      projectedD: r.projectedD,
-      distanceToDPct: r.distanceToDPct,
-      nextScanDue: r.nextScanDue.toISOString(),
-    }));
+    const hotSymbols = hotRows
+      .map((r) => ({
+        symbol: r.symbol,
+        timeframe: r.timeframe,
+        phase: r.phase,
+        bestPattern: r.bestPattern,
+        bestDirection: r.bestDirection,
+        projectedD: r.projectedD,
+        distanceToDPct: r.distanceToDPct,
+        nextScanDue: r.nextScanDue.toISOString(),
+        tier: (Number(r.distanceToDPct) <= 5 ? "IMMINENT" : "APPROACHING") as "IMMINENT" | "APPROACHING",
+      }))
+      .sort((a, b) => Number(a.distanceToDPct) - Number(b.distanceToDPct));
 
     return { total, byPhase, dueNow, nextDue, hotSymbols };
   } catch (err) {

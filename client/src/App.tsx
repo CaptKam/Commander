@@ -172,6 +172,7 @@ interface ScanStateData {
     projectedD: string | null;
     distanceToDPct: string | null;
     nextScanDue: string;
+    tier: "IMMINENT" | "APPROACHING";
   }>;
 }
 
@@ -1842,7 +1843,7 @@ function ScanStateView({ data, onSymbolClick }: { data: ScanStateData | null; on
                     </span>
                   )}
                   <span className="text-[11px] ml-auto" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
-                    {s.phase === "D_APPROACHING" ? "IMMINENT" : "PROJECTED"}
+                    {s.tier}
                   </span>
                 </div>
               ))}
