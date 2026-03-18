@@ -86,7 +86,7 @@ async function getOrder(orderId: string): Promise<AlpacaOrder | null> {
   }
 }
 
-async function placeOrder(payload: Record<string, string>): Promise<AlpacaOrder> {
+async function placeOrder(payload: Record<string, string | boolean>): Promise<AlpacaOrder> {
   const { key, secret, base } = getAlpacaConfig();
   checkTradingRateLimit();
   const res = await fetch(`${base}/v2/orders`, {
@@ -274,8 +274,9 @@ async function placeExitOrders(signal: {
       qty: String(safeQty),
       side: exitSide,
       type: "limit",
-      time_in_force: "gtc",
+      time_in_force: isCrypto ? "gtc" : "day",
       limit_price: String(safeTp2Price),
+      ...(isCrypto ? {} : { extended_hours: true }),
     });
 
     return {
@@ -311,8 +312,9 @@ async function placeExitOrders(signal: {
     qty: String(safeTp1Qty),
     side: exitSide,
     type: "limit",
-    time_in_force: "gtc",
+    time_in_force: isCrypto ? "gtc" : "day",
     limit_price: String(safeTp1Price),
+    ...(isCrypto ? {} : { extended_hours: true }),
   });
 
   // Re-query position AFTER TP1 is placed — Alpaca has now locked TP1's qty.
@@ -340,8 +342,9 @@ async function placeExitOrders(signal: {
       qty: String(freshTp2Qty),
       side: exitSide,
       type: "limit",
-      time_in_force: "gtc",
+      time_in_force: isCrypto ? "gtc" : "day",
       limit_price: String(safeTp2Price),
+      ...(isCrypto ? {} : { extended_hours: true }),
     });
   } catch (err) {
     // TP1 succeeded but TP2 failed — don't throw, return what we have.

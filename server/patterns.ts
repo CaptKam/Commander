@@ -118,12 +118,6 @@ const PATTERN_DEFS: PatternRules[] = [
     abc: { min: FIB._0382, max: FIB._0886 },
     xad: { min: FIB._1272, max: FIB._1618 },
   },
-  {
-    name: "ABCD",
-    xab: { min: FIB._0618, max: FIB._0786 },
-    abc: { min: FIB._0618, max: FIB._0786 },
-    xad: { min: FIB._1272, max: FIB._1618 },
-  },
 ];
 
 // ============================================================
@@ -280,32 +274,26 @@ export function detectHarmonics(
         continue; // D is at or below current price — would fill instantly
       }
 
-      // ---- Calculate TP and SL (Anti-NULL Rule: CLAUDE.md Rule #2) ----
-      // TP uses Fibonacci retracement of the AD leg from D (Carney method).
-      //   TP1 = 0.382 retracement of AD from D
-      //   TP2 = 0.618 retracement of AD from D
-      // SL per Carney: beyond X for retracement patterns (Gartley/Bat/Alt Bat),
-      //                beyond D for extension patterns (Butterfly/ABCD).
-      const adRange = Math.abs(A.price - projectedD);
-      const xaRange = Math.abs(A.price - X.price);
-      const isExtension = pattern.name === "Butterfly" || pattern.name === "ABCD";
-      const slBuffer = xaRange * 0.05; // 5% of XA range as breathing room
+      // ---- Calculate TP and SL (Pine Script v6 alignment) ----
+      // TP: based on CD range (not AD). Matches Pine Script's tpRatio = 0.618.
+      //   TP1 = 0.382 × CD from D (conservative, take half profit early)
+      //   TP2 = 0.618 × CD from D (matches Pine Script's single target exactly)
+      // SL: always D ± 13% of XA range. Matches Pine Script's slBuffer = 1.13.
+      const cdRange = Math.abs(C.price - projectedD);
+      const xaRange = Math.abs(X.price - A.price);
+      const SL_BUFFER = 0.13; // 13% of XA range = Pine Script slBuffer(1.13) - 1.0
       let tp1Price: number;
       let tp2Price: number;
       let stopLossPrice: number;
 
       if (direction === "long") {
-        // Long: D is a low, we expect price to rise toward A
-        tp1Price = projectedD + adRange * 0.382;
-        tp2Price = projectedD + adRange * 0.618;
-        // Extension: D is below X, SL below D. Retracement: D near X, SL below X.
-        stopLossPrice = isExtension ? projectedD - slBuffer : X.price - slBuffer;
+        tp1Price = projectedD + cdRange * 0.382;
+        tp2Price = projectedD + cdRange * 0.618;
+        stopLossPrice = projectedD - xaRange * SL_BUFFER;
       } else {
-        // Short: D is a high, we expect price to fall toward A
-        tp1Price = projectedD - adRange * 0.382;
-        tp2Price = projectedD - adRange * 0.618;
-        // Extension: D is above X, SL above D. Retracement: D near X, SL above X.
-        stopLossPrice = isExtension ? projectedD + slBuffer : X.price + slBuffer;
+        tp1Price = projectedD - cdRange * 0.382;
+        tp2Price = projectedD - cdRange * 0.618;
+        stopLossPrice = projectedD + xaRange * SL_BUFFER;
       }
 
       // Validate all exits are positive — skip if math produces bad values
@@ -363,6 +351,90 @@ export function detectHarmonics(
         tp2Price,
         stopLossPrice,
       });
+    }
+
+    // ---- Special case: ABCD detection (different math from 5-point harmonics) ----
+    // ABCD checks: AC ratio 0.382-0.886, then projects D = C ± |AB|
+    const abcRatioForABCD = calcRetrace(A.price, B.price, C.price);
+    if (ratioInRange(abcRatioForABCD, 0.382, 0.886, RATIO_TOLERANCE)) {
+      const abLen = Math.abs(A.price - B.price);
+      const direction: Direction = A.type === 1 ? "long" : "short";
+      // Bullish (long): D below C by AB length. Bearish (short): D above C by AB length.
+      const projectedD_ABCD = direction === "long"
+        ? C.price - abLen
+        : C.price + abLen;
+
+      if (Number.isFinite(projectedD_ABCD) && projectedD_ABCD > 0) {
+        // Minimum AD range check
+        const adRangePct = Math.abs(A.price - projectedD_ABCD) / A.price;
+        if (adRangePct >= MIN_AD_RANGE_PCT) {
+          const lastCandle = candles[candles.length - 1];
+          const lastClose = lastCandle.close;
+
+          // D not already hit
+          const dNotHit = direction === "long"
+            ? lastCandle.low > projectedD_ABCD
+            : lastCandle.high < projectedD_ABCD;
+
+          // D far enough from current price
+          const MIN_D_DISTANCE_PCT = 0.01;
+          const dFarEnough = direction === "long"
+            ? projectedD_ABCD < lastClose * (1 - MIN_D_DISTANCE_PCT)
+            : projectedD_ABCD > lastClose * (1 + MIN_D_DISTANCE_PCT);
+
+          if (dNotHit && dFarEnough) {
+            // TP/SL using same Pine Script v6 formulas
+            const cdRange = Math.abs(C.price - projectedD_ABCD);
+            const xaRange = Math.abs(X.price - A.price);
+            const SL_BUFFER = 0.13;
+            let tp1Price: number;
+            let tp2Price: number;
+            let stopLossPrice: number;
+
+            if (direction === "long") {
+              tp1Price = projectedD_ABCD + cdRange * 0.382;
+              tp2Price = projectedD_ABCD + cdRange * 0.618;
+              stopLossPrice = projectedD_ABCD - xaRange * SL_BUFFER;
+            } else {
+              tp1Price = projectedD_ABCD - cdRange * 0.382;
+              tp2Price = projectedD_ABCD - cdRange * 0.618;
+              stopLossPrice = projectedD_ABCD + xaRange * SL_BUFFER;
+            }
+
+            if (tp1Price > 0 && tp2Price > 0 && stopLossPrice > 0) {
+              // Hard guard: TP/SL correct side
+              const valid = direction === "long"
+                ? tp1Price > projectedD_ABCD && tp2Price > projectedD_ABCD && stopLossPrice < projectedD_ABCD
+                : tp1Price < projectedD_ABCD && tp2Price < projectedD_ABCD && stopLossPrice > projectedD_ABCD;
+
+              if (valid) {
+                console.log(
+                  `[Harmonics] ${symbol} ${timeframe} ABCD ${direction.toUpperCase()} — ` +
+                    `X=$${X.price.toFixed(2)} A=$${A.price.toFixed(2)} B=$${B.price.toFixed(2)} C=$${C.price.toFixed(2)} → ` +
+                    `D=$${projectedD_ABCD.toFixed(2)} | AC=${abcRatioForABCD.toFixed(3)} AB_len=${abLen.toFixed(2)} | ` +
+                    `SL=$${stopLossPrice.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)}`,
+                );
+
+                signals.push({
+                  symbol,
+                  timeframe,
+                  pattern: "ABCD",
+                  direction,
+                  limitPrice: projectedD_ABCD,
+                  xPrice: X.price,
+                  aPrice: A.price,
+                  bPrice: B.price,
+                  cPrice: C.price,
+                  projectedD: projectedD_ABCD,
+                  tp1Price,
+                  tp2Price,
+                  stopLossPrice,
+                });
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -456,23 +528,22 @@ export function detectCompletedPatterns(
         continue;
       }
 
-      // ---- Calculate TP and SL (same Carney logic as forming patterns) ----
-      const adRange = Math.abs(A.price - D.price);
-      const xaRange = Math.abs(A.price - X.price);
-      const isExtension = pattern.name === "Butterfly" || pattern.name === "ABCD";
-      const slBuffer = xaRange * 0.05;
+      // ---- Calculate TP and SL (Pine Script v6 alignment) ----
+      const cdRange = Math.abs(C.price - D.price);
+      const xaRange = Math.abs(X.price - A.price);
+      const SL_BUFFER = 0.13;
       let tp1Price: number;
       let tp2Price: number;
       let stopLossPrice: number;
 
       if (direction === "long") {
-        tp1Price = D.price + adRange * 0.382;
-        tp2Price = D.price + adRange * 0.618;
-        stopLossPrice = isExtension ? D.price - slBuffer : X.price - slBuffer;
+        tp1Price = D.price + cdRange * 0.382;
+        tp2Price = D.price + cdRange * 0.618;
+        stopLossPrice = D.price - xaRange * SL_BUFFER;
       } else {
-        tp1Price = D.price - adRange * 0.382;
-        tp2Price = D.price - adRange * 0.618;
-        stopLossPrice = isExtension ? D.price + slBuffer : X.price + slBuffer;
+        tp1Price = D.price - cdRange * 0.382;
+        tp2Price = D.price - cdRange * 0.618;
+        stopLossPrice = D.price + xaRange * SL_BUFFER;
       }
 
       if (tp1Price <= 0 || tp2Price <= 0 || stopLossPrice <= 0) {
@@ -543,6 +614,80 @@ export function detectCompletedPatterns(
         tp2Price,
         stopLossPrice,
       });
+    }
+
+    // ---- Special case: ABCD completed detection ----
+    // ABCD uses AC ratio (0.382-0.886) and CD/AB ratio (0.786-1.618)
+    const abcRatioForABCD = calcRetrace(A.price, B.price, C.price);
+    const abLen = Math.abs(A.price - B.price);
+    const cdLen = Math.abs(C.price - D.price);
+    const abcdRatio = cdLen / Math.max(abLen, 0.0001);
+
+    if (
+      ratioInRange(abcRatioForABCD, 0.382, 0.886, RATIO_TOLERANCE) &&
+      ratioInRange(abcdRatio, 0.786, 1.618, RATIO_TOLERANCE)
+    ) {
+      const direction: Direction = A.type === 1 ? "long" : "short";
+
+      if (Number.isFinite(D.price) && D.price > 0) {
+        const adRangePct = Math.abs(A.price - D.price) / A.price;
+        if (adRangePct >= MIN_AD_RANGE_PCT) {
+          // TP/SL using Pine Script v6 formulas
+          const cdRange_abcd = Math.abs(C.price - D.price);
+          const xaRange_abcd = Math.abs(X.price - A.price);
+          const SL_BUFFER = 0.13;
+          let tp1Price: number;
+          let tp2Price: number;
+          let stopLossPrice: number;
+
+          if (direction === "long") {
+            tp1Price = D.price + cdRange_abcd * 0.382;
+            tp2Price = D.price + cdRange_abcd * 0.618;
+            stopLossPrice = D.price - xaRange_abcd * SL_BUFFER;
+          } else {
+            tp1Price = D.price - cdRange_abcd * 0.382;
+            tp2Price = D.price - cdRange_abcd * 0.618;
+            stopLossPrice = D.price + xaRange_abcd * SL_BUFFER;
+          }
+
+          if (tp1Price > 0 && tp2Price > 0 && stopLossPrice > 0) {
+            const valid = direction === "long"
+              ? tp1Price > D.price && tp2Price > D.price && stopLossPrice < D.price
+              : tp1Price < D.price && tp2Price < D.price && stopLossPrice > D.price;
+
+            if (valid) {
+              // Slippage check: is current price still near D?
+              const lastClose = candles[candles.length - 1].close;
+              const slippagePct = Math.abs(lastClose - D.price) / D.price;
+              if (slippagePct <= 0.03) {
+                console.log(
+                  `[Harmonics] COMPLETED ${symbol} ${timeframe} ABCD ${direction.toUpperCase()} — ` +
+                    `X=$${X.price.toFixed(2)} A=$${A.price.toFixed(2)} B=$${B.price.toFixed(2)} ` +
+                    `C=$${C.price.toFixed(2)} D=$${D.price.toFixed(2)} | ` +
+                    `AC=${abcRatioForABCD.toFixed(3)} CD/AB=${abcdRatio.toFixed(3)} | ` +
+                    `SL=$${stopLossPrice.toFixed(2)} TP1=$${tp1Price.toFixed(2)} TP2=$${tp2Price.toFixed(2)}`,
+                );
+
+                signals.push({
+                  symbol,
+                  timeframe,
+                  pattern: "ABCD",
+                  direction,
+                  limitPrice: D.price,
+                  xPrice: X.price,
+                  aPrice: A.price,
+                  bPrice: B.price,
+                  cPrice: C.price,
+                  projectedD: D.price,
+                  tp1Price,
+                  tp2Price,
+                  stopLossPrice,
+                });
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -759,6 +904,69 @@ export function detectPatternPhase(
           distanceToDPct: Math.round(distPct * 100) / 100,
         };
         bestFibDeviation = fibDev;
+      }
+    }
+
+    // ---- Special case: ABCD phase detection ----
+    // ABCD uses AC ratio (0.382-0.886) and projects D = C ± |AB|
+    if (ratioInRange(abcRatio, 0.382, 0.886, RATIO_TOLERANCE)) {
+      const direction: Direction = A.type === 1 ? "long" : "short";
+      const abLen = Math.abs(A.price - B.price);
+      const projD_ABCD = direction === "long"
+        ? C.price - abLen
+        : C.price + abLen;
+
+      // Use fib deviation of AC ratio from midpoint of 0.382-0.886
+      const abcdFibDev = Math.abs(abcRatio - 0.634);
+
+      // Record BC_FORMING for ABCD
+      if (
+        PHASE_DEPTH.BC_FORMING > PHASE_DEPTH[deepest.phase] ||
+        (PHASE_DEPTH.BC_FORMING === PHASE_DEPTH[deepest.phase] && abcdFibDev < bestFibDeviation)
+      ) {
+        deepest = {
+          phase: "BC_FORMING",
+          bestPattern: "ABCD",
+          bestDirection: direction,
+          pivotCount: pivots.length,
+          xPrice: X.price,
+          aPrice: A.price,
+          bPrice: B.price,
+          cPrice: C.price,
+          projectedD: null,
+          distanceToDPct: null,
+        };
+        bestFibDeviation = abcdFibDev;
+      }
+
+      if (Number.isFinite(projD_ABCD) && projD_ABCD > 0) {
+        const dAlreadyHit = direction === "long"
+          ? lastClose <= projD_ABCD
+          : lastClose >= projD_ABCD;
+
+        if (!dAlreadyHit) {
+          const distPct = Math.abs(lastClose - projD_ABCD) / lastClose * 100;
+          const candidatePhase: PatternPhase = distPct <= 5 ? "D_APPROACHING" : "CD_PROJECTED";
+
+          if (
+            PHASE_DEPTH[candidatePhase] > PHASE_DEPTH[deepest.phase] ||
+            (PHASE_DEPTH[candidatePhase] === PHASE_DEPTH[deepest.phase] && abcdFibDev < bestFibDeviation)
+          ) {
+            deepest = {
+              phase: candidatePhase,
+              bestPattern: "ABCD",
+              bestDirection: direction,
+              pivotCount: pivots.length,
+              xPrice: X.price,
+              aPrice: A.price,
+              bPrice: B.price,
+              cPrice: C.price,
+              projectedD: projD_ABCD,
+              distanceToDPct: Math.round(distPct * 100) / 100,
+            };
+            bestFibDeviation = abcdFibDev;
+          }
+        }
       }
     }
   }

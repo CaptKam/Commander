@@ -36,6 +36,7 @@ interface AlpacaOrderPayload {
   type: "limit";
   time_in_force: "gtc" | "day";
   limit_price: string;
+  extended_hours?: boolean;
 }
 
 interface AlpacaOrderResponse {
@@ -132,9 +133,9 @@ export async function placePhaseCLimitOrder(
   // ---- Step 4: Build and send order ----
   const side: "buy" | "sell" = signal.direction === "long" ? "buy" : "sell";
 
-  // Crypto always uses GTC. Stocks use GTC for buys, DAY for sells
-  // (short sells on hard-to-borrow stocks reject GTC with 422).
-  const tif: "gtc" | "day" = isCrypto ? "gtc" : (side === "sell" ? "day" : "gtc");
+  // Crypto always uses GTC (24/7). Equities use DAY + extended_hours for
+  // pre-market (4AM) and after-hours (8PM ET) coverage.
+  const tif: "gtc" | "day" = isCrypto ? "gtc" : "day";
 
   const payload: AlpacaOrderPayload = {
     symbol: signal.symbol,
@@ -143,6 +144,7 @@ export async function placePhaseCLimitOrder(
     type: "limit",
     time_in_force: tif,
     limit_price: String(safePrice),
+    ...(isCrypto ? {} : { extended_hours: true }),
   };
 
   console.log(
