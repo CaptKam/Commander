@@ -6,3 +6,9 @@ id = "LhjzrkGaqZPrI5twJpfS2"
 uri = "file://SYSTEM_BREAKDOWN.md"
 type = "text"
 title = "Pattern Bot v2 — Complete System Breakdown"
+
+[[outputs]]
+id = "v1YhdMmFHc7BdRMWNYe--"
+uri = "file://open-positions-report.md"
+type = "text"
+title = "Open Positions Report — FTM COMMANDER"
