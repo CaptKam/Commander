@@ -413,6 +413,13 @@ export function detectCompletedPatterns(
       continue;
     }
 
+    // ---- Recency filter: reject completed patterns where D was hit long ago ----
+    // Match the Phase C recency thresholds: 40 candles for 1D, 60 for 4H
+    const MAX_D_AGE = timeframe === "1D" ? 40 : 60;
+    if (D.index < candles.length - MAX_D_AGE) {
+      continue; // D was hit too long ago — stale completed pattern
+    }
+
     // ---- Minimum leg filter: reject micro-noise pivots ----
     const xaSize = Math.abs(X.price - A.price);
     const midPrice = (X.price + A.price) / 2;
