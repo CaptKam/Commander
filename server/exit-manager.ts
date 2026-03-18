@@ -363,8 +363,49 @@ async function placeExitOrders(signal: {
 // ============================================================
 // Software SL — Get current price for a symbol
 // ============================================================
-function getCurrentPrice(symbol: string): number | null {
-  return getStreamPrice(symbol) ?? getLatestCachedPrice(symbol);
+
+/**
+ * Fetch ALL open positions from Alpaca in a single API call.
+ * Returns a map of symbol → current_price for use as a REST fallback
+ * when WebSocket and candle cache have no data.
+ */
+async function fetchAllPositionPrices(): Promise<Map<string, number>> {
+  const prices = new Map<string, number>();
+  const { key, secret, base } = getAlpacaConfig();
+  try {
+    checkTradingRateLimit();
+    const res = await fetch(`${base}/v2/positions`, {
+      headers: {
+        "APCA-API-KEY-ID": key,
+        "APCA-API-SECRET-KEY": secret,
+      },
+    });
+    if (!res.ok) {
+      console.warn(`[ExitManager] Failed to fetch positions for SL prices: ${res.status}`);
+      return prices;
+    }
+    const positions = (await res.json()) as AlpacaPosition[];
+    for (const pos of positions) {
+      const cp = Number(pos.current_price);
+      if (cp > 0) prices.set(pos.symbol, cp);
+    }
+  } catch (err) {
+    console.error("[ExitManager] fetchAllPositionPrices failed:", err);
+  }
+  return prices;
+}
+
+/** Consecutive no-price cycle counter per symbol */
+const noPriceCycles = new Map<string, number>();
+
+function getCurrentPrice(
+  symbol: string,
+  positionPrices?: Map<string, number>,
+): number | null {
+  return getStreamPrice(symbol)
+    ?? getLatestCachedPrice(symbol)
+    ?? positionPrices?.get(symbol)
+    ?? null;
 }
 
 /**
@@ -590,12 +631,31 @@ export async function runExitCycle(): Promise<void> {
       .from(liveSignals)
       .where(inArray(liveSignals.status, ["filled", "partial_exit"]));
 
+    // Fetch position prices ONCE for all filled symbols — REST API fallback
+    // when WebSocket is down and candle cache has no data.
+    // Typically 1-5 positions, so this is a single lightweight API call.
+    const positionPrices = openSignals.length > 0
+      ? await fetchAllPositionPrices()
+      : new Map<string, number>();
+
     for (const signal of openSignals) {
       const slPrice = Number(signal.stopLossPrice);
       if (!slPrice || slPrice <= 0) continue;
 
-      const currentPrice = getCurrentPrice(signal.symbol);
-      if (currentPrice === null) continue; // No price data available this cycle
+      const currentPrice = getCurrentPrice(signal.symbol, positionPrices);
+      if (currentPrice === null) {
+        // Track consecutive no-price cycles for this symbol
+        const count = (noPriceCycles.get(signal.symbol) || 0) + 1;
+        noPriceCycles.set(signal.symbol, count);
+        if (count >= 5) {
+          console.error(
+            `[ExitManager] CRITICAL: No price data for ${signal.symbol} for ${count} consecutive cycles. ` +
+            `SL at $${slPrice} NOT being monitored. WebSocket may be down.`,
+          );
+        }
+        continue;
+      }
+      noPriceCycles.delete(signal.symbol); // Reset on success
 
       if (!isSlBreached(signal.direction, currentPrice, slPrice)) continue;
 
