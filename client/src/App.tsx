@@ -41,6 +41,21 @@ interface Position {
   pattern: string | null;
 }
 
+interface Order {
+  id: string;
+  symbol: string;
+  side: string;
+  qty: number;
+  limit_price: number;
+  reserved_usd: number;
+  time_in_force: string;
+  created_at: string;
+  age_hours: number;
+  pattern: string | null;
+  direction: string | null;
+  signal_id: number | null;
+}
+
 interface Signal {
   id: number;
   symbol: string;
@@ -234,6 +249,7 @@ interface FeedEvent {
 export default function App() {
   const [account, setAccount] = useState<Account | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -253,6 +269,14 @@ export default function App() {
   const [selectedSignalId, setSelectedSignalId] = useState<number | null>(null);
   const [chartTimeframe, setChartTimeframe] = useState<"4H" | "1D">("4H");
 
+  // Cancel an open order on Alpaca
+  const cancelOrder = useCallback(async (orderId: string) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, { method: "DELETE" });
+      if (res.ok) setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } catch {}
+  }, []);
+
   // Helper: open trade page for a symbol
   const openChart = useCallback((symbol: string, signalId?: number | null, timeframe?: "4H" | "1D") => {
     setSelectedSymbol(symbol);
@@ -264,12 +288,14 @@ export default function App() {
   // Fast tier: account + positions (need real-time during trading)
   const fetchFast = useCallback(async () => {
     try {
-      const [acctRes, posRes] = await Promise.allSettled([
+      const [acctRes, posRes, ordRes] = await Promise.allSettled([
         fetch("/api/account").then((r) => r.json()),
         fetch("/api/positions").then((r) => r.json()),
+        fetch("/api/orders").then((r) => r.json()),
       ]);
       if (acctRes.status === "fulfilled") setAccount(acctRes.value);
       if (posRes.status === "fulfilled" && Array.isArray(posRes.value)) setPositions(posRes.value);
+      if (ordRes.status === "fulfilled" && Array.isArray(ordRes.value)) setOrders(ordRes.value);
     } catch {}
   }, []);
 
@@ -652,6 +678,101 @@ export default function App() {
                         {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
                       </div>
                     </div>
+                  )}
+                </div>
+
+                {/* OPEN ORDERS SECTION */}
+                <div className="shrink-0 flex flex-col" style={{ maxHeight: "30%" }}>
+                  <div className="shrink-0 flex items-center justify-between px-4 h-9 border-b" style={{ borderColor: "var(--border-default)", background: "var(--bg-card)" }}>
+                    <span className="text-[11px] uppercase tracking-widest font-medium" style={{ color: "var(--text-secondary)", fontFamily: DISPLAY }}>
+                      Open Orders ({orders.length})
+                    </span>
+                  </div>
+
+                  {orders.length === 0 ? (
+                    <div className="flex items-center justify-center py-4 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      No open orders
+                    </div>
+                  ) : (
+                    <>
+                      <div className="shrink-0 grid grid-cols-[1fr_50px_65px_75px_75px_90px_50px_40px] gap-1 px-4 py-1.5 text-[11px] uppercase tracking-wider border-b"
+                        style={{ borderColor: "var(--border-color)", color: "var(--text-muted)", background: "var(--bg-main)" }}>
+                        <div>Symbol</div>
+                        <div>Side</div>
+                        <div className="text-right">Qty</div>
+                        <div className="text-right">Limit</div>
+                        <div className="text-right">Reserved</div>
+                        <div>Pattern</div>
+                        <div className="text-right">Age</div>
+                        <div />
+                      </div>
+
+                      <div className="overflow-y-auto">
+                        {orders.map((o) => (
+                          <div
+                            key={o.id}
+                            className="grid grid-cols-[1fr_50px_65px_75px_75px_90px_50px_40px] gap-1 px-4 py-2 border-b items-center"
+                            style={{ borderColor: "rgba(255,255,255,0.03)" }}
+                          >
+                            <div className="min-w-0">
+                              <span className="font-semibold truncate cursor-pointer hover:underline" style={{ color: "var(--accent-green)" }} onClick={() => openChart(o.symbol)}>
+                                {o.symbol}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[11px] px-1 py-px rounded uppercase font-semibold"
+                                style={{
+                                  background: o.side === "buy" ? "var(--accent-green-dim)" : "var(--accent-red-dim)",
+                                  color: o.side === "buy" ? "var(--accent-green)" : "var(--accent-red)",
+                                }}>
+                                {o.side}
+                              </span>
+                            </div>
+                            <div className="text-right" style={{ color: "var(--text-main)" }}>{o.qty < 1 ? o.qty.toFixed(6) : o.qty.toFixed(2)}</div>
+                            <div className="text-right" style={{ color: "var(--text-muted)" }}>{fmt(o.limit_price)}</div>
+                            <div className="text-right" style={{ color: "var(--text-main)" }}>{fmt(o.reserved_usd)}</div>
+                            <div className="truncate">
+                              {o.pattern ? (
+                                <span className="text-[10px]" style={{ color: "var(--accent-amber)" }}>
+                                  {o.pattern}{o.direction ? ` ${o.direction.toUpperCase()}` : ""}
+                                </span>
+                              ) : o.signal_id ? (
+                                <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{o.side === "buy" ? "ENTRY" : "TP"}</span>
+                              ) : (
+                                <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>—</span>
+                              )}
+                            </div>
+                            <div className="text-right text-[11px]" style={{ color: "var(--text-muted)" }}>
+                              {o.age_hours < 1 ? "< 1h" : `${Math.floor(o.age_hours)}h`}
+                            </div>
+                            <div className="text-right">
+                              <button
+                                className="text-[9px] px-1.5 py-0.5 rounded font-semibold hover:opacity-80"
+                                style={{ background: "var(--accent-red-dim)", color: "var(--accent-red)" }}
+                                onClick={() => cancelOrder(o.id)}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {(() => {
+                        const totalReserved = orders.reduce((s, o) => s + o.reserved_usd, 0);
+                        return (
+                          <div
+                            className="shrink-0 grid grid-cols-[1fr_50px_65px_75px_75px_90px_50px_40px] gap-1 px-4 py-2 border-t"
+                            style={{ borderColor: "var(--border-color)", background: "var(--bg-panel)" }}
+                          >
+                            <div className="text-[11px] uppercase font-semibold" style={{ color: "var(--text-muted)" }}>Total Reserved</div>
+                            <div /><div /><div />
+                            <div className="text-right font-bold" style={{ color: "var(--text-main)" }}>{fmt(totalReserved)}</div>
+                            <div /><div /><div />
+                          </div>
+                        );
+                      })()}
+                    </>
                   )}
                 </div>
 
