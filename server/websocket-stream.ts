@@ -371,7 +371,7 @@ function createStream(
             trades: symbols,
           }));
           // WebSocket restored — stop REST fallback polling
-          if (isCrypto) stopRestPriceFallback();
+          stopRestPriceFallback();
           continue;
         }
 
@@ -421,6 +421,9 @@ function createStream(
         scheduleSipMarketCheck();
         return;
       }
+
+      // SIP WebSocket down — start REST fallback polling for stock prices
+      startRestPriceFallback();
 
       // If too many consecutive failures, suspend
       if (sipConsecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
