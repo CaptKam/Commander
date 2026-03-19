@@ -30,7 +30,7 @@ import { liveSignals } from "../shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { formatAlpacaQty, formatAlpacaPrice } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
-import { getStreamPrice, getPriceWithAge } from "./websocket-stream";
+import { getStreamPrice } from "./websocket-stream";
 import { getLatestCachedPrice } from "./alpaca-data";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 
@@ -659,17 +659,6 @@ export async function runExitCycle(): Promise<void> {
         continue;
       }
       noPriceCycles.delete(signal.symbol); // Reset on success
-
-      // SAFETY: Do NOT make SL decisions on stale price data
-      const priceData = getPriceWithAge(signal.symbol);
-      if (!priceData || !priceData.fresh) {
-        const ageSeconds = priceData ? Math.round(priceData.ageMs / 1000) : null;
-        console.warn(
-          `[ExitManager] SKIPPING SL check for ${signal.symbol} — ` +
-          `price is ${ageSeconds ? ageSeconds + 's old' : 'unavailable'} (stale threshold: 60s)`,
-        );
-        continue; // DO NOT make SL decisions on stale data
-      }
 
       if (!isSlBreached(signal.direction, currentPrice, slPrice)) continue;
 

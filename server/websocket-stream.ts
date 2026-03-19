@@ -22,13 +22,6 @@
 import WebSocket from "ws";
 
 // ============================================================
-// Price freshness thresholds
-// ============================================================
-export const PRICE_MAX_AGE_MS = 60_000;        // 60 seconds — price is "stale" after this
-export const PRICE_CRITICAL_AGE_MS = 300_000;   // 5 minutes — price is "dead" after this
-export const PRICE_OFFLINE_CYCLES = 5;          // Alert after 5 consecutive stale cycles
-
-// ============================================================
 // Shared price cache — latest trade price per symbol
 // ============================================================
 const latestPrices = new Map<string, { price: number; timestamp: number }>();
@@ -61,105 +54,6 @@ export function setStreamPriceIfStale(symbol: string, price: number): void {
  */
 export function getAllStreamPrices(): Map<string, { price: number; timestamp: number }> {
   return new Map(latestPrices);
-}
-
-/**
- * Returns true if the cached price for a symbol is less than PRICE_MAX_AGE_MS old.
- */
-export function isPriceFresh(symbol: string): boolean {
-  const entry = latestPrices.get(symbol) ?? latestPrices.get(symbol.replace(/\//g, ""));
-  if (!entry) return false;
-  return (Date.now() - entry.timestamp) < PRICE_MAX_AGE_MS;
-}
-
-/**
- * Returns the age in ms of the cached price, or null if no price exists.
- */
-export function getPriceAge(symbol: string): number | null {
-  const entry = latestPrices.get(symbol) ?? latestPrices.get(symbol.replace(/\//g, ""));
-  if (!entry) return null;
-  return Date.now() - entry.timestamp;
-}
-
-/**
- * Returns price, age, and freshness status for a symbol.
- */
-export function getPriceWithAge(symbol: string): { price: number; ageMs: number; fresh: boolean } | null {
-  const entry = latestPrices.get(symbol) ?? latestPrices.get(symbol.replace(/\//g, ""));
-  if (!entry) return null;
-  const ageMs = Date.now() - entry.timestamp;
-  return { price: entry.price, ageMs, fresh: ageMs < PRICE_MAX_AGE_MS };
-}
-
-/**
- * Returns count of symbols with fresh prices vs total tracked.
- */
-export function getPriceFreshnessStats(): { fresh: number; stale: number; dead: number; total: number } {
-  let fresh = 0, stale = 0, dead = 0;
-  const now = Date.now();
-  for (const [, entry] of latestPrices) {
-    const age = now - entry.timestamp;
-    if (age < PRICE_MAX_AGE_MS) fresh++;
-    else if (age < PRICE_CRITICAL_AGE_MS) stale++;
-    else dead++;
-  }
-  return { fresh, stale, dead, total: latestPrices.size };
-}
-
-// ============================================================
-// REST Price Fallback — activates when WebSocket is down
-// Polls Alpaca /v2/positions for current prices every 30s.
-// ============================================================
-let restFallbackActive = false;
-let restFallbackInterval: ReturnType<typeof setInterval> | null = null;
-
-export function startRestPriceFallback(): void {
-  if (restFallbackActive) return;
-  restFallbackActive = true;
-  console.log("[PriceFallback] WebSocket down — starting REST price polling every 30s");
-
-  const poll = async () => {
-    try {
-      const key = process.env.ALPACA_API_KEY;
-      const secret = process.env.ALPACA_API_SECRET;
-      if (!key || !secret) return;
-      const rawBase = process.env.ALPACA_BASE_URL ?? "https://paper-api.alpaca.markets";
-      const base = rawBase.replace(/\/v2\/?$/, "");
-
-      const res = await fetch(`${base}/v2/positions`, {
-        headers: {
-          "APCA-API-KEY-ID": key,
-          "APCA-API-SECRET-KEY": secret,
-        },
-      });
-      if (res.ok) {
-        const positions = (await res.json()) as Array<{ symbol: string; current_price: string }>;
-        for (const pos of positions) {
-          const price = parseFloat(pos.current_price);
-          if (price > 0) {
-            // Only update if we don't have a fresher WebSocket price
-            const existing = latestPrices.get(pos.symbol);
-            if (!existing || (Date.now() - existing.timestamp) > 15_000) {
-              latestPrices.set(pos.symbol, { price, timestamp: Date.now() });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.error("[PriceFallback] REST poll failed:", e);
-    }
-  };
-
-  poll(); // immediate first poll
-  restFallbackInterval = setInterval(poll, 30_000);
-}
-
-export function stopRestPriceFallback(): void {
-  if (!restFallbackActive) return;
-  restFallbackActive = false;
-  if (restFallbackInterval) clearInterval(restFallbackInterval);
-  restFallbackInterval = null;
-  console.log("[PriceFallback] WebSocket restored — stopping REST polling");
 }
 
 // ============================================================
@@ -370,8 +264,6 @@ function createStream(
             action: "subscribe",
             trades: symbols,
           }));
-          // WebSocket restored — stop REST fallback polling
-          if (isCrypto) stopRestPriceFallback();
           continue;
         }
 
@@ -447,9 +339,6 @@ function createStream(
         createStream(url, label, symbols, getReconnectMs, setReconnectMs, setWs, getWs, setHeartbeat, getHeartbeat);
       }, delayMs);
     } else if (isCrypto) {
-      // Crypto WebSocket down — start REST fallback polling
-      startRestPriceFallback();
-
       const was406 = lastCryptoError406;
       lastCryptoError406 = false;
 

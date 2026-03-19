@@ -16,7 +16,7 @@ import { liveSignals } from "../shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { formatAlpacaQty } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
-import { getStreamPrice, getPriceWithAge } from "./websocket-stream";
+import { getStreamPrice } from "./websocket-stream";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 
 // ============================================================
@@ -176,17 +176,6 @@ export async function runCryptoMonitor(): Promise<void> {
       const sl = Number(freshSignal.stopLossPrice);
       const isLong = freshSignal.direction === "long";
       const signalStatus = freshSignal.status;
-
-      // SAFETY: Do NOT make TP/SL decisions on stale price data
-      const priceAgeData = getPriceWithAge(pos.symbol);
-      if (priceAgeData && !priceAgeData.fresh) {
-        const ageSeconds = Math.round(priceAgeData.ageMs / 1000);
-        console.warn(
-          `[PositionMonitor] SKIPPING TP/SL check for ${pos.symbol} — ` +
-          `price is ${ageSeconds}s old (stale threshold: 60s)`,
-        );
-        continue;
-      }
 
       // ---- Check SL hit ----
       const slHit = isLong ? currentPrice <= sl : currentPrice >= sl;
