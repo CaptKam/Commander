@@ -142,6 +142,12 @@ export async function runCryptoMonitor(): Promise<void> {
     if (activeSignals.length === 0) return;
 
     for (const pos of positions) {
+      // --- PRICE INTEGRITY CHECK ---
+      if (!isPriceFresh(pos.symbol)) {
+        console.warn(`[CRYPTO MONITOR] Stale price detected for ${pos.symbol}. Skipping check.`);
+        continue;
+      }
+      // -----------------------------
       const posQty = Number(pos.qty);
       const isCrypto = pos.symbol.includes("/");
 
