@@ -713,6 +713,7 @@ async function runScanCycle(): Promise<void> {
               .where(eq(liveSignals.id, inserted.id));
             try { pipelineStats.ordersPlaced++; } catch {}
           }
+          }
         } else {
           console.warn(
             `[Orchestrator] Skipping order for ${signal.symbol} — no equity data`,
