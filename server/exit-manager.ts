@@ -648,6 +648,12 @@ export async function runExitCycle(): Promise<void> {
 
       const currentPrice = getCurrentPrice(signal.symbol, positionPrices);
       if (currentPrice === null) {
+        // --- PRICE INTEGRITY CHECK ---
+        if (!isPriceFresh(signal.symbol)) {
+          console.warn(`[EXIT MANAGER] Stale price detected for ${signal.symbol}. Skipping exit evaluation to protect capital.`);
+          continue; 
+        }
+        // -----------------------------
         // Track consecutive no-price cycles for this symbol
         const count = (noPriceCycles.get(signal.symbol) || 0) + 1;
         noPriceCycles.set(signal.symbol, count);
