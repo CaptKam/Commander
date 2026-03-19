@@ -634,17 +634,6 @@ async function runScanCycle(): Promise<void> {
           cPrice: String(signal.cPrice),
         });
 
-        // ---- Telegram alert: only fires for truly new signals ----
-        sendPhaseCSignal(
-          signal.symbol,
-          signal.timeframe,
-          signal.pattern,
-          signal.direction,
-          signal.limitPrice,
-        ).catch((alertErr) => {
-          console.error(`[Orchestrator] Telegram alert failed for ${signal.symbol}:`, alertErr);
-        });
-
         // ---- Insert into Neon DB (returning ID for exit manager tracking) ----
         const [inserted] = await db.insert(liveSignals).values({ ...parsed, score: signalScore }).returning({ id: liveSignals.id });
         console.log(
@@ -712,6 +701,14 @@ async function runScanCycle(): Promise<void> {
               .set({ entryOrderId: order.id })
               .where(eq(liveSignals.id, inserted.id));
             try { pipelineStats.ordersPlaced++; } catch {}
+            // Telegram alert — only when order is actually placed
+            sendPhaseCSignal(
+              signal.symbol,
+              signal.timeframe,
+              signal.pattern,
+              signal.direction,
+              signal.limitPrice,
+            ).catch(() => {});
           }
           }
         } else {
@@ -860,6 +857,14 @@ async function runScanCycle(): Promise<void> {
             existingOrderSymbols.add(alpacaSymbol);
             placed++;
             console.log(`[Catchup] Order placed for ${sig.symbol} ${sig.patternType} ${sig.direction} (id=${order.id})`);
+            // Telegram alert — only when order is actually placed
+            sendPhaseCSignal(
+              sig.symbol,
+              sig.timeframe as "1D" | "4H",
+              sig.patternType,
+              sig.direction as "long" | "short",
+              Number(sig.entryPrice),
+            ).catch(() => {});
           } catch (err: any) {
             if (err?.notShortable) {
               await db.update(liveSignals)
@@ -1004,6 +1009,14 @@ async function runScanCycle(): Promise<void> {
               `(price now ${(distancePct * 100).toFixed(1)}% from D) — order placed`,
             );
             try { pipelineStats.ordersPlaced++; } catch {}
+            // Telegram alert — only when order is actually placed
+            sendPhaseCSignal(
+              sig.symbol,
+              sig.timeframe as "1D" | "4H",
+              sig.patternType,
+              sig.direction as "long" | "short",
+              Number(sig.entryPrice),
+            ).catch(() => {});
           } catch (err: any) {
             if (err?.notShortable) {
               await db.update(liveSignals)
