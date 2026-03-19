@@ -29,7 +29,7 @@ Alpaca will instantly reject orders with a 422 Unprocessable Entity if decimal l
 - **No Hallucinations:** Do not guess file paths or assume external package exports. If you are unsure, use your grep or ls tools to verify the codebase structure before writing code.
 - **Database Migrations:** ONLY use Drizzle ORM for database queries. If you change a schema, explicitly remind the user to run the Drizzle migration command.
 - **Decoupled Architecture:** Treat the Alpaca Data Scanner, the Harmonic Compute Engine, and the Alpaca Execution Engine as decoupled components. API latency in one must not crash the others.
-- **Alpaca Free Tier:** We are on the free tier (200 req/min). The rate limiter in `alpaca-data.ts` enforces this. Do NOT add unbounded API loops or remove the cache TTLs.
+- **Alpaca Rate Limit:** We are on the Algo Trader Plus tier (1000 req/min). The rate limiter in `alpaca-data.ts` enforces this with 100ms throttling between calls. Do NOT add unbounded API loops or remove the cache TTLs.
 
 ## Current Focus
 We are migrating off a fragile prototype environment into a robust production environment. Focus on stability, strict TypeScript typing, and eliminating silent failures.
