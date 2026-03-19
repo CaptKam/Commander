@@ -268,7 +268,10 @@ export default function App() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedSignalId, setSelectedSignalId] = useState<number | null>(null);
   const [chartTimeframe, setChartTimeframe] = useState<"4H" | "1D">("4H");
-  const [tickerData, setTickerData] = useState<Array<{symbol: string; price: number}>>([]);
+  const [tickerData, setTickerData] = useState<Array<{symbol: string; price: number; freshness?: string}>>([]);
+  const [priceHealth, setPriceHealth] = useState<{
+    fresh: number; stale: number; dead: number; total: number; healthy: boolean;
+  } | null>(null);
   const [marketClock, setMarketClock] = useState({ isOpen: false, label: "CLOSED", countdown: "" });
 
   // Cancel an open order on Alpaca
@@ -375,6 +378,14 @@ export default function App() {
     const poll = () => fetch("/api/ticker").then(r => r.json()).then(setTickerData).catch(() => {});
     poll();
     const id = setInterval(poll, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Price health polling — 10s
+  useEffect(() => {
+    const poll = () => fetch("/api/price-health").then(r => r.json()).then(setPriceHealth).catch(() => {});
+    poll();
+    const id = setInterval(poll, 10_000);
     return () => clearInterval(id);
   }, []);
 
@@ -534,20 +545,55 @@ export default function App() {
             whiteSpace: "nowrap",
             paddingLeft: "100%",
           }}>
-            {tickerData.concat(tickerData).map((t, i) => (
-              <span key={i} style={{
-                fontSize: 11,
-                fontFamily: "'JetBrains Mono', monospace",
-                letterSpacing: "0.5px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-              }}>
-                <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>{t.symbol}</span>
-                <span style={{ color: "var(--text-main)" }}>${t.price < 1 ? t.price.toFixed(4) : t.price < 100 ? t.price.toFixed(2) : t.price.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
-              </span>
-            ))}
+            {tickerData.concat(tickerData).map((t, i) => {
+              const dotColor = t.freshness === "fresh" ? "#22c55e" : t.freshness === "stale" ? "#eab308" : t.freshness === "dead" ? "#ef4444" : "transparent";
+              const isStale = t.freshness !== "fresh";
+              return (
+                <span key={i} style={{
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  letterSpacing: "0.5px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  opacity: isStale ? 0.4 : 1,
+                }}>
+                  <span style={{
+                    width: 5, height: 5, borderRadius: "50%",
+                    background: dotColor,
+                    boxShadow: `0 0 4px ${dotColor}`,
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>{t.symbol}</span>
+                  <span style={{ color: "var(--text-main)" }}>${t.price < 1 ? t.price.toFixed(4) : t.price < 100 ? t.price.toFixed(2) : t.price.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                </span>
+              );
+            })}
           </div>
+        </div>
+      )}
+
+      {/* STALE PRICE WARNING BANNER */}
+      {priceHealth && !priceHealth.healthy && (
+        <div style={{
+          height: 32,
+          background: "rgba(239, 68, 68, 0.15)",
+          borderBottom: "1px solid rgba(239, 68, 68, 0.3)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+        }}>
+          <span style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "#ef4444",
+            fontFamily: DISPLAY,
+            letterSpacing: "1px",
+            textTransform: "uppercase",
+          }}>
+            WARNING: PRICES STALE — {priceHealth.stale} stale, {priceHealth.dead} offline — DO NOT TRADE ON DISPLAYED P&L
+          </span>
         </div>
       )}
 
@@ -576,12 +622,18 @@ export default function App() {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider" style={{ color: "var(--text-dim)", fontFamily: DISPLAY }}>P&L</span>
-            <span className="font-semibold" style={{ fontSize: "16px", color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-              {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
-            </span>
-            <span className="text-[12px]" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)", opacity: 0.7 }}>
-              ({totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%)
-            </span>
+            {priceHealth && !priceHealth.healthy ? (
+              <span className="font-semibold" style={{ fontSize: "16px", color: "var(--text-dim)" }}>—</span>
+            ) : (
+              <>
+                <span className="font-semibold" style={{ fontSize: "16px", color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
+                  {totalPl >= 0 ? "+" : ""}{fmt(totalPl)}
+                </span>
+                <span className="text-[12px]" style={{ color: totalPl >= 0 ? "var(--accent-green)" : "var(--accent-red)", opacity: 0.7 }}>
+                  ({totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%)
+                </span>
+              </>
+            )}
           </div>
           <div style={{ width: 1, height: 16, background: "var(--border-default)" }} />
           <div className="flex items-center gap-2">
@@ -791,7 +843,14 @@ export default function App() {
                         <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp1 ? fmt(p.tp1) : "—"}</div>
                         <div className="text-right" style={{ color: "var(--accent-green)" }}>{p.tp2 ? fmt(p.tp2) : "—"}</div>
                         <div className="text-right font-semibold" style={{ color: p.unrealized_pl >= 0 ? "var(--accent-green)" : "var(--accent-red)" }}>
-                          {p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}
+                          {priceHealth && !priceHealth.healthy ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <span style={{ opacity: 0.3, textDecoration: "line-through" }}>{p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}</span>
+                              <span style={{ fontSize: 9, color: "#ef4444", fontWeight: 700, letterSpacing: "0.5px" }}>STALE</span>
+                            </span>
+                          ) : (
+                            <>{p.unrealized_pl >= 0 ? "+" : ""}{fmt(p.unrealized_pl)}</>
+                          )}
                         </div>
                       </div>
                     ))

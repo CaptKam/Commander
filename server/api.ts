@@ -8,7 +8,7 @@ import { db } from "./db";
 import { liveSignals, watchlist, systemSettings, symbolScanState } from "../shared/schema";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { getCacheStats, getLatestCachedPrice, fetchWatchlist } from "./alpaca-data";
-import { getStreamPrice, getStreamStatus, getAllStreamPrices } from "./websocket-stream";
+import { getStreamPrice, getStreamStatus, getAllStreamPrices, getPriceFreshnessStats } from "./websocket-stream";
 import { fixStuckExits } from "./exit-manager";
 import { lastScanTimestamp, lastScanCandidates, lastScanPassedFilter, totalScanCount, isStockMarketOpen, pipelineStats } from "./orchestrator";
 
@@ -1416,20 +1416,53 @@ router.get("/health", (_req, res) => {
 });
 
 // ============================================================
+// Price Health — freshness status of all tracked prices
+// ============================================================
+router.get("/price-health", (_req, res) => {
+  const stats = getPriceFreshnessStats();
+  const prices = getAllStreamPrices();
+  const now = Date.now();
+
+  const details: Array<{ symbol: string; price: number; ageMs: number; status: string }> = [];
+  for (const [symbol, entry] of prices) {
+    const age = now - entry.timestamp;
+    details.push({
+      symbol,
+      price: entry.price,
+      ageMs: age,
+      status: age < 60_000 ? "fresh" : age < 300_000 ? "stale" : "dead",
+    });
+  }
+
+  details.sort((a, b) => b.ageMs - a.ageMs); // stalest first
+
+  res.json({
+    ...stats,
+    healthy: stats.stale === 0 && stats.dead === 0,
+    details,
+  });
+});
+
+// ============================================================
 // Ticker tape — streaming prices for top watchlist symbols
 // ============================================================
 router.get("/ticker", (_req, res) => {
   const prices = getAllStreamPrices();
-  const watchlist = ["BTC/USD","ETH/USD","SOL/USD","DOGE/USD","XRP/USD","TSLA","NVDA","AMZN","META","AAPL","MSFT","SPY","QQQ","AMD","GOOGL"];
+  const now = Date.now();
+  const wl = ["BTC/USD","ETH/USD","SOL/USD","DOGE/USD","XRP/USD","TSLA","NVDA","AMZN","META","AAPL","MSFT","SPY","QQQ","AMD","GOOGL"];
 
-  const ticker = watchlist.map(symbol => {
+  const ticker = wl.map(symbol => {
     const entry = prices.get(symbol) ?? prices.get(symbol.replace(/\//g, ""));
+    if (!entry) return null;
+    const ageMs = now - entry.timestamp;
     return {
       symbol: symbol.replace("/USD", ""),
-      price: entry?.price ?? null,
-      timestamp: entry?.timestamp ?? null,
+      price: entry.price,
+      timestamp: entry.timestamp,
+      ageMs,
+      freshness: ageMs < 60_000 ? "fresh" : ageMs < 300_000 ? "stale" : "dead",
     };
-  }).filter(t => t.price !== null);
+  }).filter((t): t is NonNullable<typeof t> => t !== null);
 
   res.json(ticker);
 });
