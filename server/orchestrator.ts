@@ -16,7 +16,7 @@ import type { PhaseCSignal } from "./screener";
 import { runExitCycle } from "./exit-manager";
 import { runCryptoMonitor } from "./crypto-monitor";
 import { validateSignalQuality, AGE_WINDOW_MS } from "./quality-filters";
-import { startPriceStreams, stopPriceStreams, getStreamPrice, setStreamPriceIfStale } from "./websocket-stream";
+import { startPriceStreams, stopPriceStreams, getStreamPrice, setStreamPriceIfStale, isPriceFresh, getPriceFreshnessStats, PRICE_OFFLINE_CYCLES } from "./websocket-stream";
 import { placePhaseCLimitOrder, getAccountEquity } from "./alpaca";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 import { selectBestSignals } from "./signal-ranker";
@@ -132,6 +132,7 @@ export function isStockMarketOpen(): boolean {
 let isScanning = false;
 let scanCount = 0;
 let scanIntervalId: ReturnType<typeof setInterval> | null = null;
+let consecutiveStaleCycles = 0;
 
 // Exported scan metrics for /api/status
 export let lastScanTimestamp: number = 0;
@@ -232,6 +233,14 @@ function isWithinProximity(signal: PhaseCSignal): boolean {
     return false;
   }
 
+  // SAFETY: Do NOT place orders based on stale price data
+  if (!isPriceFresh(signal.symbol)) {
+    console.warn(
+      `[Orchestrator] BLOCKING order for ${signal.symbol} — price data is stale`,
+    );
+    return false;
+  }
+
   const entryPrice = signal.limitPrice;
   const distancePct = Math.abs(currentPrice - entryPrice) / entryPrice;
 
@@ -267,6 +276,23 @@ async function runScanCycle(): Promise<void> {
 
   try {
     scanCount++;
+
+    // ============================================================
+    // Price Integrity: Track consecutive cycles with all prices stale
+    // ============================================================
+    const priceStats = getPriceFreshnessStats();
+    if (priceStats.fresh === 0 && priceStats.total > 0) {
+      consecutiveStaleCycles++;
+      if (consecutiveStaleCycles === PRICE_OFFLINE_CYCLES) {
+        sendError("PRICE DATA OFFLINE",
+          `All ${priceStats.total} price feeds are stale or dead. ` +
+          `WebSocket may be disconnected. SL monitoring is SUSPENDED. ` +
+          `Manual intervention may be required.`,
+        ).catch(() => {});
+      }
+    } else {
+      consecutiveStaleCycles = 0;
+    }
 
     // ============================================================
     // Step 0: Initialize scan states on first run — seed from universe
