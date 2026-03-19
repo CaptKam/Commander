@@ -197,11 +197,39 @@ function markSignalSent(signal: PhaseCSignal): void {
   const key = signal.symbol; // Symbol-only — one signal per symbol
   sentSignals.set(key, Date.now() + SIGNAL_CACHE_TTL_MS);
 }
+// ============================================================
+// Max Open Orders Cap — prevent capital lockup
+// ============================================================
+const MAX_OPEN_ORDERS = 5; // Industry standard: 3-10 concurrent
+let cachedOpenOrderCount: number | null = null;
+let cachedOpenOrderCountTs = 0;
+
+async function getOpenOrderCount(): Promise<number> {
+  // Cache for 30 seconds to avoid hammering Alpaca API
+  if (cachedOpenOrderCount !== null && Date.now() - cachedOpenOrderCountTs < 30_000) {
+    return cachedOpenOrderCount;
+  }
+  try {
+    const res = await fetch(`${process.env.ALPACA_BASE_URL || "https://paper-api.alpaca.markets"}/v2/orders?status=open`, {
+      headers: {
+        "APCA-API-KEY-ID": process.env.ALPACA_API_KEY!,
+        "APCA-API-SECRET-KEY": process.env.ALPACA_API_SECRET!,
+      },
+    });
+    if (res.ok) {
+      const orders = await res.json() as any[];
+      cachedOpenOrderCount = orders.length;
+      cachedOpenOrderCountTs = Date.now();
+      return orders.length;
+    }
+  } catch {}
+  return cachedOpenOrderCount ?? 0;
+}
 
 // ============================================================
 // Proximity Gate — only place orders when price is near projected D
 // ============================================================
-const PROXIMITY_THRESHOLD_PCT = 0.05; // 5% from entry price
+const PROXIMITY_THRESHOLD_PCT = 0.02; // 2% from entry price — industry standard (Freqtrade default) // 5% from entry price
 
 /**
  * Checks if the current market price is within proximity of the signal's
@@ -668,6 +696,12 @@ async function runScanCycle(): Promise<void> {
             );
             try { pipelineStats.ordersSkipped++; } catch {}
           } else {
+          // ---- Max open orders cap ----
+          const openCount = await getOpenOrderCount();
+          if (openCount >= MAX_OPEN_ORDERS) {
+            console.warn(`[Orchestrator] MAX_OPEN_ORDERS (${MAX_OPEN_ORDERS}) reached — skipping ${signal.symbol}`);
+            try { pipelineStats.ordersSkipped++; } catch {}
+          } else {
           const order = await placePhaseCLimitOrder(signal, equity, isCrypto, {
               equity: settings.equityAllocation,
               crypto: settings.cryptoAllocation,
@@ -807,6 +841,12 @@ async function runScanCycle(): Promise<void> {
               bPrice: Number(sig.bPrice ?? 0),
               cPrice: Number(sig.cPrice ?? 0),
             };
+            // ---- Max open orders cap ----
+            const catchupOpenCount = await getOpenOrderCount();
+            if (catchupOpenCount >= MAX_OPEN_ORDERS) {
+              console.warn(`[Orchestrator] MAX_OPEN_ORDERS reached — skipping catch-up for ${sig.symbol}`);
+              continue;
+            }
 
             const order = await placePhaseCLimitOrder(pseudoSignal as any, catchupEquity, isCrypto, {
               equity: settings.equityAllocation,
@@ -920,6 +960,13 @@ async function runScanCycle(): Promise<void> {
           const notional = promoEquity * allocation;
           if (promoBuyingPower !== null && notional > promoBuyingPower) {
             console.warn(`[Orchestrator] Cannot promote ${sig.symbol}: insufficient buying power`);
+            continue;
+          }
+
+          // ---- Max open orders cap ----
+          const promoOpenCount = await getOpenOrderCount();
+          if (promoOpenCount >= MAX_OPEN_ORDERS) {
+            console.warn("[Orchestrator] MAX_OPEN_ORDERS reached — skipping promotion for " + sig.symbol);
             continue;
           }
 
