@@ -1,4 +1,3 @@
-import { isPriceFresh } from "./websocket-stream";
 /**
  * Exit Manager — Automated TP/SL Order Lifecycle
  *
@@ -31,7 +30,7 @@ import { liveSignals } from "../shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { formatAlpacaQty, formatAlpacaPrice } from "./utils/alpacaFormatters";
 import { sendError } from "./utils/notifier";
-import { getStreamPrice } from "./websocket-stream";
+import { getStreamPrice, getPriceWithAge, isPriceFresh } from "./websocket-stream";
 import { getLatestCachedPrice } from "./alpaca-data";
 import { checkTradingRateLimit } from "./utils/tradingRateLimiter";
 
@@ -648,12 +647,6 @@ export async function runExitCycle(): Promise<void> {
 
       const currentPrice = getCurrentPrice(signal.symbol, positionPrices);
       if (currentPrice === null) {
-        // --- PRICE INTEGRITY CHECK ---
-        if (!isPriceFresh(signal.symbol)) {
-          console.warn(`[EXIT MANAGER] Stale price detected for ${signal.symbol}. Skipping exit evaluation to protect capital.`);
-          continue; 
-        }
-        // -----------------------------
         // Track consecutive no-price cycles for this symbol
         const count = (noPriceCycles.get(signal.symbol) || 0) + 1;
         noPriceCycles.set(signal.symbol, count);
@@ -666,6 +659,17 @@ export async function runExitCycle(): Promise<void> {
         continue;
       }
       noPriceCycles.delete(signal.symbol); // Reset on success
+
+      // SAFETY: Do NOT make SL decisions on stale price data
+      if (!isPriceFresh(signal.symbol)) {
+        const priceData = getPriceWithAge(signal.symbol);
+        const ageSeconds = priceData ? Math.round(priceData.ageMs / 1000) : null;
+        console.warn(
+          `[ExitManager] SKIPPING SL check for ${signal.symbol} — ` +
+          `price is ${ageSeconds ? ageSeconds + 's old' : 'unavailable'} (stale threshold: 60s)`,
+        );
+        continue; // DO NOT make SL decisions on stale data
+      }
 
       if (!isSlBreached(signal.direction, currentPrice, slPrice)) continue;
 
