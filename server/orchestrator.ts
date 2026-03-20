@@ -131,7 +131,7 @@ export function isStockMarketOpen(): boolean {
 // ============================================================
 let isScanning = false;
 let scanCount = 0;
-let scanIntervalId: ReturnType<typeof setInterval> | null = null;
+let scanIntervalId: ReturnType<typeof setTimeout> | null = null;
 
 // Exported scan metrics for /api/status
 export let lastScanTimestamp: number = 0;
@@ -178,17 +178,11 @@ const sentSignals = new Map<string, number>();
 const SIGNAL_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 function isSignalAlreadySent(signal: PhaseCSignal): boolean {
-  const key = signal.symbol; // Symbol-only — one signal per symbol
-  const now = Date.now();
+  const key = signal.symbol;
   const expiresAt = sentSignals.get(key);
-  if (expiresAt && expiresAt > now) return true;
-  // NOTE: Do NOT set the cache here — only mark after the signal is
-  // actually processed (DB dedup passed + DB insert succeeded).
-  // Lazy cleanup
-  if (sentSignals.size > 500) {
-    for (const [k, v] of sentSignals) {
-      if (v <= now) sentSignals.delete(k);
-    }
+  if (expiresAt) {
+    if (expiresAt > Date.now()) return true;
+    sentSignals.delete(key);
   }
   return false;
 }
@@ -593,7 +587,7 @@ async function runScanCycle(): Promise<void> {
       // One signal per symbol — if ANY active signal exists for this symbol, skip.
       // Only active statuses block; dismissed/expired/outranked do NOT block new signals.
       try {
-        const timeWindow = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7-day window
+        const timeWindow = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30-day window
 
         const existing = await db
           .select({ id: liveSignals.id, patternType: liveSignals.patternType, timeframe: liveSignals.timeframe, status: liveSignals.status })
@@ -601,7 +595,7 @@ async function runScanCycle(): Promise<void> {
           .where(
             and(
               eq(liveSignals.symbol, signal.symbol),
-              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "projected"]),
+              inArray(liveSignals.status, ["pending", "filled", "partial_exit", "projected", "paper_only"]),
               gte(liveSignals.createdAt, timeWindow),
             ),
           )
@@ -775,7 +769,7 @@ async function runScanCycle(): Promise<void> {
       if (pendingNoOrder.length > 0) {
         const equityData = await getAccountEquity();
         const catchupEquity = equityData?.equity ?? null;
-        const catchupBp = equityData?.buyingPower ?? null;
+        let catchupBp = equityData?.buyingPower ?? null;
 
         const existingOrderSymbols = new Set<string>();
         try {
@@ -862,6 +856,7 @@ async function runScanCycle(): Promise<void> {
             existingOrderSymbols.add(alpacaSymbol);
             placed++;
             cachedOpenOrderCount = (cachedOpenOrderCount ?? 0) + 1;
+            if (catchupBp !== null) { catchupBp -= notional; }
             console.log(`[Catchup] Order placed for ${sig.symbol} ${sig.patternType} ${sig.direction} (id=${order.id})`);
             // Telegram alert — only when order is actually placed
             sendPhaseCSignal(
@@ -1200,10 +1195,12 @@ export async function startEngine(): Promise<void> {
   // Run the first scan immediately (don't wait 30s)
   await runScanCycle();
 
-  // Start the interval loop
-  scanIntervalId = setInterval(() => {
-    runScanCycle();
-  }, SCAN_INTERVAL_MS);
+  // Start the recursive loop — setTimeout prevents overlapping ticks
+  const loop = async () => {
+    await runScanCycle();
+    scanIntervalId = setTimeout(loop, SCAN_INTERVAL_MS);
+  };
+  loop();
 
   console.log(
     `[Orchestrator] Scanner loop started: every ${SCAN_INTERVAL_MS / 1000}s. ` +
@@ -1216,7 +1213,7 @@ export async function startEngine(): Promise<void> {
  */
 export function stopEngine(): void {
   if (scanIntervalId !== null) {
-    clearInterval(scanIntervalId);
+    clearTimeout(scanIntervalId);
     scanIntervalId = null;
     console.log("[Orchestrator] Scanner loop stopped.");
   }
