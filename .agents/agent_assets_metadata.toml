@@ -18,3 +18,9 @@ id = "TP0Z3Zb8X8UlXHt7hKSaJ"
 uri = "file://ftm-commander-full-review.md"
 type = "text"
 title = "FTM COMMANDER — Complete System Review"
+
+[[outputs]]
+id = "nrLiHP7XbCihUnZh9lUeS"
+uri = "file://trade-workup-march20.md"
+type = "text"
+title = "FTM COMMANDER — Complete Trade Workup — March 20, 2026"
