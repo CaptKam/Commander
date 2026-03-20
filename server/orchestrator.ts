@@ -702,6 +702,7 @@ async function runScanCycle(): Promise<void> {
               .set({ entryOrderId: order.id })
               .where(eq(liveSignals.id, inserted.id));
             try { pipelineStats.ordersPlaced++; } catch {}
+            cachedOpenOrderCount = (cachedOpenOrderCount ?? 0) + 1;
             // Telegram alert — only when order is actually placed
             sendPhaseCSignal(
               signal.symbol,
@@ -857,6 +858,7 @@ async function runScanCycle(): Promise<void> {
               .where(eq(liveSignals.id, sig.id));
             existingOrderSymbols.add(alpacaSymbol);
             placed++;
+            cachedOpenOrderCount = (cachedOpenOrderCount ?? 0) + 1;
             console.log(`[Catchup] Order placed for ${sig.symbol} ${sig.patternType} ${sig.direction} (id=${order.id})`);
             // Telegram alert — only when order is actually placed
             sendPhaseCSignal(
@@ -1010,6 +1012,7 @@ async function runScanCycle(): Promise<void> {
               `(price now ${(distancePct * 100).toFixed(1)}% from D) — order placed`,
             );
             try { pipelineStats.ordersPlaced++; } catch {}
+            cachedOpenOrderCount = (cachedOpenOrderCount ?? 0) + 1;
             // Telegram alert — only when order is actually placed
             sendPhaseCSignal(
               sig.symbol,
