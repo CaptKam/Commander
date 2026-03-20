@@ -229,7 +229,8 @@ async function getOpenOrderCount(): Promise<number> {
 // ============================================================
 // Proximity Gate — only place orders when price is near projected D
 // ============================================================
-const PROXIMITY_THRESHOLD_PCT = 0.02; // 2% from entry price — industry standard (Freqtrade default) // 5% from entry price
+const EQUITY_PROXIMITY_PCT = 0.02;  // 2% for stocks
+const CRYPTO_PROXIMITY_PCT = 0.04;  // 4% for crypto — more volatile
 
 /**
  * Checks if the current market price is within proximity of the signal's
@@ -260,20 +261,22 @@ function isWithinProximity(signal: PhaseCSignal): boolean {
     return false;
   }
 
+  const isCrypto = signal.symbol.includes("/");
+  const threshold = isCrypto ? CRYPTO_PROXIMITY_PCT : EQUITY_PROXIMITY_PCT;
   const entryPrice = signal.limitPrice;
   const distancePct = Math.abs(currentPrice - entryPrice) / entryPrice;
 
-  if (distancePct <= PROXIMITY_THRESHOLD_PCT) {
+  if (distancePct <= threshold) {
     console.log(
       `[Orchestrator] ${signal.symbol} within proximity: current=$${currentPrice.toFixed(4)} ` +
-      `entry=$${entryPrice.toFixed(4)} (${(distancePct * 100).toFixed(1)}% away, threshold=${(PROXIMITY_THRESHOLD_PCT * 100)}%)`,
+      `entry=$${entryPrice.toFixed(4)} (${(distancePct * 100).toFixed(1)}% away, threshold=${(threshold * 100)}%)`,
     );
     return true;
   }
 
   console.log(
     `[Orchestrator] ${signal.symbol} NOT within proximity: current=$${currentPrice.toFixed(4)} ` +
-    `entry=$${entryPrice.toFixed(4)} (${(distancePct * 100).toFixed(1)}% away > ${(PROXIMITY_THRESHOLD_PCT * 100)}% threshold)`,
+    `entry=$${entryPrice.toFixed(4)} (${(distancePct * 100).toFixed(1)}% away > ${(threshold * 100)}% threshold)`,
   );
   return false;
 }
@@ -957,7 +960,8 @@ async function runScanCycle(): Promise<void> {
           if (currentPrice === null || currentPrice <= 0) continue;
 
           const distancePct = Math.abs(currentPrice - entryPrice) / entryPrice;
-          if (distancePct > PROXIMITY_THRESHOLD_PCT) continue;
+          const promoThreshold = sigIsCrypto ? CRYPTO_PROXIMITY_PCT : EQUITY_PROXIMITY_PCT;
+          if (distancePct > promoThreshold) continue;
 
           // Price is now close — check market hours for equities
           if (!sigIsCrypto && !isStockMarketOpen()) continue;
