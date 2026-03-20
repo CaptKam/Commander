@@ -617,6 +617,7 @@ async function runScanCycle(): Promise<void> {
 
       const isCrypto = signal.symbol.includes("/");
 
+      let inserted: { id: number } | undefined;
       try {
         // ---- Zod validation (Anti-NULL Rule: CLAUDE.md Rule #2) ----
         const parsed = insertLiveSignalSchema.parse({
@@ -635,7 +636,7 @@ async function runScanCycle(): Promise<void> {
         });
 
         // ---- Insert into Neon DB (returning ID for exit manager tracking) ----
-        const [inserted] = await db.insert(liveSignals).values({ ...parsed, score: signalScore }).returning({ id: liveSignals.id });
+        [inserted] = await db.insert(liveSignals).values({ ...parsed, score: signalScore }).returning({ id: liveSignals.id });
         console.log(
           `[Orchestrator] Signal saved to DB: ${signal.symbol} ${signal.pattern} score=${signalScore.toFixed(1)} (id=${inserted.id})`,
         );
